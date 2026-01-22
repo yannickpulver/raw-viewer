@@ -4,7 +4,7 @@
 import sys
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication
 
 from scanner import scan_folder
 from viewer import ImageViewer
@@ -13,35 +13,17 @@ from viewer import ImageViewer
 def main():
     app = QApplication(sys.argv)
 
-    # Get folder from args or picker
+    # Get folder from args (optional)
+    files = []
     if len(sys.argv) > 1:
         folder = Path(sys.argv[1])
-    else:
-        folder_str = QFileDialog.getExistingDirectory(
-            None,
-            "Select folder with RAW files",
-            str(Path.home())
-        )
-        if not folder_str:
-            sys.exit(0)
-        folder = Path(folder_str)
+        print(f"Scanning {folder}...")
+        files = scan_folder(folder)
+        if files:
+            print(f"Found {len(files)} RAW files")
 
-    # Scan for RAW files
-    print(f"Scanning {folder}...")
-    files = scan_folder(folder)
-
-    if not files:
-        QMessageBox.warning(
-            None,
-            "No RAW files",
-            f"No RAW files found in {folder}"
-        )
-        sys.exit(1)
-
-    print(f"Found {len(files)} RAW files")
-
-    # Launch viewer
-    viewer = ImageViewer(files)
+    # Launch viewer (with or without files)
+    viewer = ImageViewer(files if files else None)
     viewer.show()
 
     sys.exit(app.exec())

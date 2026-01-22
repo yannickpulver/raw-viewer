@@ -6,12 +6,13 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import subprocess
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
 from preview import extract_preview, extract_thumbnail
 from rating import read_rating, write_rating
+from scanner import scan_folder
 
 
 class PreloadSignals(QObject):
@@ -333,10 +334,10 @@ class FilmstripWidget(QScrollArea):
 class ImageViewer(QMainWindow):
     CACHE_SIZE = 7
 
-    def __init__(self, files: List[Path]):
+    def __init__(self, files: Optional[List[Path]] = None):
         super().__init__()
-        self.files = files
-        self.all_files = files  # Keep original list
+        self.files = files or []
+        self.all_files = self.files  # Keep original list
         self.index = 0
         self.cache: Dict[int, QPixmap] = {}
         self.ratings: Dict[int, int] = {}  # Maps original index to rating
@@ -370,7 +371,7 @@ class ImageViewer(QMainWindow):
 
         # Filmstrip
         self.filmstrip = FilmstripWidget()
-        self.filmstrip.set_total(len(files))
+        self.filmstrip.set_total(len(self.files))
         self.filmstrip.clicked.connect(self._on_filmstrip_click)
         self.filmstrip.visible_range_changed.connect(self._on_visible_range_changed)
         layout.addWidget(self.filmstrip)
@@ -453,6 +454,16 @@ class ImageViewer(QMainWindow):
                 border: 1px solid #ffb400;
             }
         """
+        # Open folder button (in toolbar)
+        self.open_btn_small = QPushButton("📂")
+        self.open_btn_small.setStyleSheet(button_style)
+        self.open_btn_small.clicked.connect(self._open_folder)
+        filter_layout.addWidget(self.open_btn_small)
+
+        # Spacer
+        filter_layout.addSpacing(10)
+
+        # Filter buttons
         labels = ["All", "1+", "2+", "3+", "4+", "5"]
         for i, label in enumerate(labels):
             btn = QPushButton(label)
@@ -465,10 +476,31 @@ class ImageViewer(QMainWindow):
         self.filter_buttons[0].setChecked(True)
         self.filter_buttons_widget.adjustSize()
 
+        # Centered open button (shown when no files)
+        self.open_btn_center = QPushButton("📂 Open Folder", self)
+        self.open_btn_center.setStyleSheet("""
+            QPushButton {
+                background-color: rgba(60, 60, 60, 220);
+                color: white;
+                border: 1px solid #666;
+                padding: 15px 30px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 16px;
+            }
+            QPushButton:hover {
+                background-color: rgba(80, 80, 80, 240);
+            }
+        """)
+        self.open_btn_center.clicked.connect(self._open_folder)
+        self.open_btn_center.adjustSize()
+
         # Window setup
         self.setWindowTitle("RAW Viewer")
         self.setStyleSheet("background-color: black;")
         self.resize(1400, 900)
+
+        # Update UI state
+        self._update_empty_state()
 
         # Load initial
         if self.files:
@@ -713,14 +745,74 @@ class ImageViewer(QMainWindow):
         for i, btn in enumerate(self.filter_buttons):
             btn.setChecked(i == self.min_rating_filter)
 
+    def _open_folder(self):
+        """Open folder picker and load new files."""
+        folder_str = QFileDialog.getExistingDirectory(
+            self,
+            "Select folder with RAW files",
+            str(Path.home())
+        )
+        if not folder_str:
+            return
+
+        folder = Path(folder_str)
+        files = scan_folder(folder)
+
+        if not files:
+            return
+
+        # Clear state
+        self.cache.clear()
+        self.ratings.clear()
+        self.loading.clear()
+        self.thumb_loading.clear()
+        self.filmstrip.thumbnails.clear()
+
+        # Load new files
+        self.files = files
+        self.all_files = files
+        self.index = 0
+        self.min_rating_filter = 0
+
+        # Update UI
+        self.filmstrip.set_total(len(self.files))
+        self._update_filter_buttons()
+        self._update_empty_state()
+        self._load_current()
+        self._preload_nearby()
+        self._update_overlay()
+
+    def _update_empty_state(self):
+        """Show/hide UI elements based on whether files are loaded."""
+        has_files = len(self.files) > 0
+        # Show filter buttons only when files loaded
+        for btn in self.filter_buttons:
+            btn.setVisible(has_files)
+        # Show filmstrip only when files loaded
+        self.filmstrip.setVisible(has_files)
+        # Show centered button only when no files
+        self.open_btn_center.setVisible(not has_files)
+        # Reposition centered button
+        if not has_files:
+            self._center_open_button()
+
+    def _center_open_button(self):
+        """Center the open button on screen."""
+        btn_x = (self.width() - self.open_btn_center.width()) // 2
+        btn_y = (self.height() - self.open_btn_center.height()) // 2
+        self.open_btn_center.move(btn_x, btn_y)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_overlay()
         # Position filter buttons in bottom right, above filmstrip
-        filmstrip_height = self.filmstrip.height()
+        filmstrip_height = self.filmstrip.height() if self.filmstrip.isVisible() else 0
         btn_y = self.height() - filmstrip_height - self.filter_buttons_widget.height() - 10
         btn_x = self.width() - self.filter_buttons_widget.width() - 10
         self.filter_buttons_widget.move(btn_x, btn_y)
+        # Center open button if visible
+        if self.open_btn_center.isVisible():
+            self._center_open_button()
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
