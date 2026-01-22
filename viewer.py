@@ -8,7 +8,7 @@ import subprocess
 
 from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
 from preview import extract_preview, extract_thumbnail
 from rating import read_rating, write_rating
@@ -150,6 +150,7 @@ class FilmstripContent(QWidget):
     SPACING = 4
 
     clicked = pyqtSignal(int)
+    visible_range_changed = pyqtSignal(int, int)  # first, last visible index
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -158,6 +159,33 @@ class FilmstripContent(QWidget):
         self.total_count = 0
         self.ratings: Dict[int, int] = {}
         self.setStyleSheet("background-color: transparent;")
+        self._dirty = False
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._do_update)
+        self._last_visible_range = (-1, -1)
+
+    def _schedule_update(self):
+        self._dirty = True
+        if not self._update_timer.isActive():
+            self._update_timer.start(50)  # Batch updates every 50ms
+
+    def _do_update(self):
+        if self._dirty:
+            self._dirty = False
+            self.update()
+
+    def update_visible_range(self, viewport_rect):
+        """Calculate and emit visible range based on viewport."""
+        if self.total_count == 0:
+            return
+        item_width = self.THUMB_SIZE + self.SPACING
+        first = max(0, viewport_rect.left() // item_width)
+        last = min(self.total_count - 1, viewport_rect.right() // item_width + 1)
+        new_range = (first, last)
+        if new_range != self._last_visible_range:
+            self._last_visible_range = new_range
+            self.visible_range_changed.emit(first, last)
 
     def set_total(self, count: int):
         self.total_count = count
@@ -169,15 +197,15 @@ class FilmstripContent(QWidget):
 
     def set_thumbnail(self, index: int, pixmap: QPixmap):
         self.thumbnails[index] = pixmap
-        self.update()
+        self._schedule_update()
 
     def set_current(self, index: int):
         self.current_index = index
-        self.update()
+        self.update()  # Immediate for navigation
 
     def set_rating(self, index: int, rating: int):
         self.ratings[index] = rating
-        self.update()
+        self._schedule_update()
 
     def paintEvent(self, event):
         if self.total_count == 0:
@@ -185,11 +213,19 @@ class FilmstripContent(QWidget):
 
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor(20, 20, 20))
 
-        for idx in range(self.total_count):
-            x = idx * (self.THUMB_SIZE + self.SPACING)
-            y = 0
+        # Only paint visible region
+        rect = event.rect()
+        item_width = self.THUMB_SIZE + self.SPACING
+        first_visible = max(0, rect.left() // item_width)
+        last_visible = min(self.total_count - 1, rect.right() // item_width + 1)
+
+        # Fill only visible background
+        painter.fillRect(rect, QColor(20, 20, 20))
+
+        for idx in range(first_visible, last_visible + 1):
+            x = idx * item_width
+            y = 4  # Padding for selection border
 
             # Draw thumbnail or placeholder
             if idx in self.thumbnails:
@@ -230,17 +266,20 @@ class FilmstripContent(QWidget):
 class FilmstripWidget(QScrollArea):
     """Horizontal scrollable filmstrip."""
     clicked = pyqtSignal(int)
+    visible_range_changed = pyqtSignal(int, int)
+    THUMB_SIZE = FilmstripContent.THUMB_SIZE
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.content = FilmstripContent()
         self.content.clicked.connect(self.clicked.emit)
+        self.content.visible_range_changed.connect(self.visible_range_changed.emit)
 
         self.setWidget(self.content)
         self.setWidgetResizable(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.setFixedHeight(FilmstripContent.THUMB_SIZE + 40)
+        self.setFixedHeight(FilmstripContent.THUMB_SIZE + 44)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.content.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setStyleSheet("""
@@ -249,6 +288,27 @@ class FilmstripWidget(QScrollArea):
             QScrollBar::handle:horizontal { background: #666; border-radius: 4px; min-width: 30px; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
         """)
+
+        # Track scroll to update visible range (debounced)
+        self._scroll_timer = QTimer()
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.timeout.connect(self._on_scroll_stopped)
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+
+    def _on_scroll(self):
+        """Debounce scroll - only load after scrolling stops."""
+        self._scroll_timer.start(150)  # Wait 150ms after last scroll
+
+    def _on_scroll_stopped(self):
+        """Scrolling stopped - now load visible thumbnails."""
+        viewport_rect = self.viewport().rect()
+        viewport_rect.moveLeft(self.horizontalScrollBar().value())
+        self.content.update_visible_range(viewport_rect)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # Initial visible range update
+        QTimer.singleShot(0, self._on_scroll_stopped)
 
     @property
     def thumbnails(self):
@@ -293,6 +353,11 @@ class ImageViewer(QMainWindow):
         self.thumb_loading: set = set()
         self.lock = threading.Lock()
 
+        # Throttled progress update
+        self._progress_timer = QTimer()
+        self._progress_timer.timeout.connect(self._update_loading_progress)
+        self._progress_timer.start(200)  # Update every 200ms
+
         # Main layout
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -307,6 +372,7 @@ class ImageViewer(QMainWindow):
         self.filmstrip = FilmstripWidget()
         self.filmstrip.set_total(len(files))
         self.filmstrip.clicked.connect(self._on_filmstrip_click)
+        self.filmstrip.visible_range_changed.connect(self._on_visible_range_changed)
         layout.addWidget(self.filmstrip)
 
         self.setCentralWidget(central)
@@ -438,8 +504,6 @@ class ImageViewer(QMainWindow):
         orig_idx = self.all_files.index(self.files[idx])
         rating = self.ratings.get(orig_idx, 0)
         self.filmstrip.set_rating(idx, rating)
-        # Update loading progress
-        self._update_loading_progress()
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
@@ -457,10 +521,6 @@ class ImageViewer(QMainWindow):
             self.preload_signals.loaded.emit(idx, pixmap)
 
     def _preload_thumb(self, idx: int):
-        # Load thumbnail directly (lighter than full preview)
-        import time
-        time.sleep(0.05)  # Small delay to keep UI responsive
-
         # Load rating too
         orig_idx = self.all_files.index(self.files[idx])
         if orig_idx not in self.ratings:
@@ -482,21 +542,27 @@ class ImageViewer(QMainWindow):
 
     def _preload_thumbnails(self):
         """Preload thumbnails around current index (for navigation)."""
-        half = 10
-        for offset in range(-half, half + 1):
-            idx = self.index + offset
-            with self.lock:
-                if 0 <= idx < len(self.files) and idx not in self.filmstrip.thumbnails and idx not in self.thumb_loading:
-                    self.thumb_loading.add(idx)
-                    self.thumb_executor.submit(self._preload_thumb, idx)
+        self._load_thumbnails_range(self.index - 10, self.index + 10)
 
-    def _preload_all_thumbnails(self):
-        """Queue all thumbnails for background loading."""
-        for idx in range(len(self.files)):
+    def _on_visible_range_changed(self, first: int, last: int):
+        """Load thumbnails for visible range + buffer."""
+        buffer = 5  # Load a few extra on each side
+        self._load_thumbnails_range(first - buffer, last + buffer)
+
+    def _load_thumbnails_range(self, start: int, end: int):
+        """Load thumbnails in a specific range."""
+        start = max(0, start)
+        end = min(len(self.files) - 1, end)
+        for idx in range(start, end + 1):
             with self.lock:
                 if idx not in self.filmstrip.thumbnails and idx not in self.thumb_loading:
                     self.thumb_loading.add(idx)
                     self.thumb_executor.submit(self._preload_thumb, idx)
+
+    def _preload_all_thumbnails(self):
+        """Initial load - just trigger visible range update."""
+        # Don't load all - let visible_range_changed handle it
+        pass
 
     def _trim_cache(self):
         with self.lock:
