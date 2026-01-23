@@ -10,9 +10,10 @@ from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayo
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
-from preview import extract_preview, extract_thumbnail
+from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes
 from rating import read_rating, write_rating
 from scanner import scan_folder
+from thumbnail_cache import ThumbnailCache
 
 
 class PreloadSignals(QObject):
@@ -298,7 +299,7 @@ class FilmstripWidget(QScrollArea):
 
     def _on_scroll(self):
         """Debounce scroll - only load after scrolling stops."""
-        self._scroll_timer.start(150)  # Wait 150ms after last scroll
+        self._scroll_timer.start(50)  # Wait 50ms after last scroll (disk cache makes this safe)
 
     def _on_scroll_stopped(self):
         """Scrolling stopped - now load visible thumbnails."""
@@ -349,10 +350,13 @@ class ImageViewer(QMainWindow):
         self.preload_signals.loaded.connect(self._on_preloaded)
         self.preload_signals.thumb_loaded.connect(self._on_thumb_loaded)
         self.executor = ThreadPoolExecutor(max_workers=4)  # Main previews
-        self.thumb_executor = ThreadPoolExecutor(max_workers=2)  # Thumbnails (lower priority)
+        self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.loading: set = set()
         self.thumb_loading: set = set()
         self.lock = threading.Lock()
+
+        # Persistent thumbnail cache
+        self.thumb_cache = ThumbnailCache()
 
         # Throttled progress update
         self._progress_timer = QTimer()
@@ -559,9 +563,26 @@ class ImageViewer(QMainWindow):
             rating = read_rating(self.files[idx])
             self.ratings[orig_idx] = rating if rating is not None else 0
 
-        pixmap = extract_thumbnail(self.files[idx], 80)
-        if pixmap:
-            self.preload_signals.thumb_loaded.emit(idx, pixmap)
+        path = self.files[idx]
+        size = 80
+
+        # Check disk cache first
+        cached_bytes = self.thumb_cache.get(path, size)
+        if cached_bytes:
+            pixmap = QPixmap()
+            pixmap.loadFromData(cached_bytes)
+            if not pixmap.isNull():
+                self.preload_signals.thumb_loaded.emit(idx, pixmap)
+                return
+
+        # Generate and cache
+        thumb_bytes = extract_thumbnail_bytes(path, size)
+        if thumb_bytes:
+            self.thumb_cache.set(path, size, thumb_bytes)
+            pixmap = QPixmap()
+            pixmap.loadFromData(thumb_bytes)
+            if not pixmap.isNull():
+                self.preload_signals.thumb_loaded.emit(idx, pixmap)
 
     def _preload_nearby(self):
         for offset in [1, -1, 2, -2, 3, -3]:
@@ -592,9 +613,41 @@ class ImageViewer(QMainWindow):
                     self.thumb_executor.submit(self._preload_thumb, idx)
 
     def _preload_all_thumbnails(self):
-        """Initial load - just trigger visible range update."""
-        # Don't load all - let visible_range_changed handle it
-        pass
+        """Progressively load all thumbnails in background."""
+        # Start background preload timer
+        if not hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer = QTimer()
+            self._bg_preload_timer.timeout.connect(self._background_preload_batch)
+            self._bg_preload_idx = 0
+
+        self._bg_preload_idx = 0
+        self._bg_preload_timer.start(100)  # Process batch every 100ms
+
+    def _background_preload_batch(self):
+        """Load a batch of thumbnails in background (low priority)."""
+        if not self.files:
+            self._bg_preload_timer.stop()
+            return
+
+        batch_size = 5  # Load 5 at a time
+        loaded = 0
+
+        while self._bg_preload_idx < len(self.files) and loaded < batch_size:
+            idx = self._bg_preload_idx
+            self._bg_preload_idx += 1
+
+            # Skip if already loaded or loading
+            with self.lock:
+                if idx in self.filmstrip.thumbnails or idx in self.thumb_loading:
+                    continue
+                self.thumb_loading.add(idx)
+
+            self.thumb_executor.submit(self._preload_thumb, idx)
+            loaded += 1
+
+        # Stop when done
+        if self._bg_preload_idx >= len(self.files):
+            self._bg_preload_timer.stop()
 
     def _trim_cache(self):
         with self.lock:
@@ -710,6 +763,10 @@ class ImageViewer(QMainWindow):
 
     def _apply_filter(self, min_rating: int):
         """Apply rating filter."""
+        # Stop background preload
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
+
         self.min_rating_filter = min_rating
 
         if min_rating == 0:
@@ -723,6 +780,7 @@ class ImageViewer(QMainWindow):
         # Update filmstrip
         self.filmstrip.set_total(len(self.files))
         self.filmstrip.thumbnails.clear()
+        self.thumb_loading.clear()
 
         # Reset index
         if self.files:
@@ -761,6 +819,10 @@ class ImageViewer(QMainWindow):
         if not files:
             return
 
+        # Stop background preload
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
+
         # Clear state
         self.cache.clear()
         self.ratings.clear()
@@ -780,6 +842,7 @@ class ImageViewer(QMainWindow):
         self._update_empty_state()
         self._load_current()
         self._preload_nearby()
+        self._preload_all_thumbnails()
         self._update_overlay()
 
     def _update_empty_state(self):
@@ -867,6 +930,9 @@ class ImageViewer(QMainWindow):
             self._navigate(1)
 
     def closeEvent(self, event):
+        # Stop background preload timer
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
         self.executor.shutdown(wait=False)
         self.thumb_executor.shutdown(wait=False)
         super().closeEvent(event)

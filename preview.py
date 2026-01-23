@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 import rawpy
 from PyQt6.QtGui import QImage, QPixmap, QTransform
-from PyQt6.QtCore import QByteArray, Qt
+from PyQt6.QtCore import QByteArray, QBuffer, QIODevice, Qt
 
 
 def get_orientation_transform(orientation: int) -> QTransform:
@@ -162,3 +162,18 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
     except Exception as e:
         print(f"Error loading thumbnail {path}: {e}")
         return None
+
+
+def extract_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> Optional[bytes]:
+    """Extract thumbnail and return as JPEG bytes for caching."""
+    pixmap = extract_thumbnail(path, size)
+    if pixmap is None:
+        return None
+
+    # Convert to JPEG bytes
+    byte_array = QByteArray()
+    buffer = QBuffer(byte_array)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    pixmap.save(buffer, "JPEG", quality)
+    buffer.close()
+    return bytes(byte_array.data())
