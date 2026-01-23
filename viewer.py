@@ -902,8 +902,8 @@ class ImageViewer(QMainWindow):
                 subprocess.run(['open', str(folder)])
         elif key == Qt.Key.Key_Escape:
             self.close()
-        elif key == Qt.Key.Key_Q and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
-                                       event.modifiers() == Qt.KeyboardModifier.MetaModifier):
+        elif key in (Qt.Key.Key_Q, Qt.Key.Key_W) and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
+                                                       event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self.close()
         else:
             super().keyPressEvent(event)
