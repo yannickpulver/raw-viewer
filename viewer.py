@@ -5,6 +5,7 @@ from typing import List, Dict, Optional
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import subprocess
+import platform
 
 from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
@@ -441,6 +442,23 @@ class ImageViewer(QMainWindow):
         """)
         self.filter_label.setVisible(False)
 
+        # Title label (centered in title bar)
+        self.title_label = QLabel("RAW Viewer", self)
+        self.title_label.setStyleSheet("""
+            QLabel {
+                background-color: transparent;
+                color: rgba(255, 255, 255, 120);
+                padding: 0px 12px;
+                font-family: 'SF Pro Text', 'Helvetica Neue', sans-serif;
+                font-size: 13px;
+                font-weight: 500;
+            }
+        """)
+        self.title_label.adjustSize()
+
+        # Drag state
+        self._drag_pos = None
+
         # Filter buttons container
         self.filter_buttons_widget = QWidget(self)
         self.filter_buttons_widget.setStyleSheet("background: transparent;")
@@ -520,6 +538,7 @@ class ImageViewer(QMainWindow):
         self.setWindowTitle("RAW Viewer")
         self.setStyleSheet("background-color: black;")
         self.resize(1400, 900)
+        self._titlebar_configured = False
 
         # Update UI state
         self._update_empty_state()
@@ -1001,6 +1020,8 @@ class ImageViewer(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_overlay()
+        # Position title label (centered horizontally in title bar area)
+        self.title_label.move((self.width() - self.title_label.width()) // 2, 6)
         # Position filter buttons in bottom right, above filmstrip
         filmstrip_height = self.filmstrip.height() if self.filmstrip.isVisible() else 0
         btn_y = self.height() - filmstrip_height - self.filter_buttons_widget.height() - 10
@@ -1009,6 +1030,28 @@ class ImageViewer(QMainWindow):
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
+
+    def mousePressEvent(self, event: QMouseEvent):
+        """Start drag if clicking in title bar area."""
+        if event.button() == Qt.MouseButton.LeftButton and event.position().y() < 40:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent):
+        """Drag window if in title bar drag mode."""
+        if self._drag_pos is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        """End drag mode."""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = None
+        super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
@@ -1087,6 +1130,29 @@ class ImageViewer(QMainWindow):
 
         if self.index < len(self.files) - 1:
             self._navigate(1)
+
+    def showEvent(self, event):
+        """Configure transparent titlebar after window is shown."""
+        super().showEvent(event)
+        if not self._titlebar_configured:
+            self._titlebar_configured = True
+            QTimer.singleShot(0, self._setup_transparent_titlebar)
+
+    def _setup_transparent_titlebar(self):
+        """Configure transparent title bar on macOS."""
+        if platform.system() != "Darwin":
+            return
+        try:
+            from AppKit import NSApplication
+            ns_app = NSApplication.sharedApplication()
+            for window in ns_app.windows():
+                if window.title() == self.windowTitle():
+                    window.setStyleMask_(window.styleMask() | (1 << 15))  # NSWindowStyleMaskFullSizeContentView
+                    window.setTitlebarAppearsTransparent_(True)
+                    window.setTitleVisibility_(1)  # NSWindowTitleHidden
+                    break
+        except ImportError:
+            pass
 
     def closeEvent(self, event):
         # Stop background preload timer
