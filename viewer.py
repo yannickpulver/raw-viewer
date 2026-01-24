@@ -14,6 +14,7 @@ from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes
 from rating import read_rating, write_rating
 from scanner import scan_folder
 from thumbnail_cache import ThumbnailCache
+from recent_folders import load_recent_folders, add_recent_folder
 
 
 class PreloadSignals(QObject):
@@ -498,6 +499,14 @@ class ImageViewer(QMainWindow):
         self.open_btn_center.clicked.connect(self._open_folder)
         self.open_btn_center.adjustSize()
 
+        # Recent folders container
+        self.recent_container = QWidget(self)
+        self.recent_layout = QVBoxLayout(self.recent_container)
+        self.recent_layout.setContentsMargins(0, 10, 0, 0)
+        self.recent_layout.setSpacing(5)
+        self.recent_buttons: List[QPushButton] = []
+        self._update_recent_folders_ui()
+
         # Window setup
         self.setWindowTitle("RAW Viewer")
         self.setStyleSheet("background-color: black;")
@@ -767,6 +776,9 @@ class ImageViewer(QMainWindow):
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
 
+        # Remember currently selected file
+        current_file = self.files[self.index] if self.files and 0 <= self.index < len(self.files) else None
+
         self.min_rating_filter = min_rating
 
         if min_rating == 0:
@@ -782,9 +794,12 @@ class ImageViewer(QMainWindow):
         self.filmstrip.thumbnails.clear()
         self.thumb_loading.clear()
 
-        # Reset index
+        # Preserve selection if still in filtered list, otherwise reset to 0
         if self.files:
-            self.index = 0
+            if current_file and current_file in self.files:
+                self.index = self.files.index(current_file)
+            else:
+                self.index = 0
             self._load_current()
             self._preload_nearby()
             self._preload_all_thumbnails()
@@ -805,19 +820,30 @@ class ImageViewer(QMainWindow):
 
     def _open_folder(self):
         """Open folder picker and load new files."""
+        # Start from last used folder if available
+        recent = load_recent_folders()
+        start_dir = recent[0] if recent else str(Path.home())
+
         folder_str = QFileDialog.getExistingDirectory(
             self,
             "Select folder with RAW files",
-            str(Path.home())
+            start_dir
         )
         if not folder_str:
             return
 
-        folder = Path(folder_str)
+        self._load_folder(Path(folder_str))
+
+    def _load_folder(self, folder: Path):
+        """Load files from folder."""
         files = scan_folder(folder)
 
         if not files:
             return
+
+        # Save to recent folders
+        add_recent_folder(str(folder))
+        self._update_recent_folders_ui()
 
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
@@ -853,17 +879,69 @@ class ImageViewer(QMainWindow):
             btn.setVisible(has_files)
         # Show filmstrip only when files loaded
         self.filmstrip.setVisible(has_files)
-        # Show centered button only when no files
+        # Show centered button and recent folders only when no files
         self.open_btn_center.setVisible(not has_files)
+        self.recent_container.setVisible(not has_files and len(self.recent_buttons) > 0)
         # Reposition centered button
         if not has_files:
             self._center_open_button()
 
     def _center_open_button(self):
-        """Center the open button on screen."""
+        """Center the open button and recent folders on screen."""
+        # Position open button
         btn_x = (self.width() - self.open_btn_center.width()) // 2
-        btn_y = (self.height() - self.open_btn_center.height()) // 2
+        btn_y = (self.height() - self.open_btn_center.height()) // 2 - 40
         self.open_btn_center.move(btn_x, btn_y)
+
+        # Position recent folders below button
+        self.recent_container.adjustSize()
+        rc_x = (self.width() - self.recent_container.width()) // 2
+        rc_y = btn_y + self.open_btn_center.height() + 15
+        self.recent_container.move(rc_x, rc_y)
+
+    def _update_recent_folders_ui(self):
+        """Update recent folders buttons."""
+        # Clear existing buttons
+        for btn in self.recent_buttons:
+            self.recent_layout.removeWidget(btn)
+            btn.deleteLater()
+        self.recent_buttons.clear()
+
+        recent = load_recent_folders()
+        if not recent:
+            return
+
+        btn_style = """
+            QPushButton {
+                background-color: rgba(40, 40, 40, 200);
+                color: #aaa;
+                border: 1px solid #444;
+                padding: 8px 15px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 12px;
+                text-align: left;
+            }
+            QPushButton:hover {
+                background-color: rgba(60, 60, 60, 220);
+                color: white;
+            }
+        """
+
+        for folder in recent:
+            # Show only folder name, not full path
+            display_name = Path(folder).name
+            btn = QPushButton(f"📁 {display_name}", self.recent_container)
+            btn.setStyleSheet(btn_style)
+            btn.setToolTip(folder)
+            btn.clicked.connect(lambda checked, f=folder: self._open_recent_folder(f))
+            self.recent_layout.addWidget(btn)
+            self.recent_buttons.append(btn)
+
+        self.recent_container.adjustSize()
+
+    def _open_recent_folder(self, folder: str):
+        """Open a folder from recent list."""
+        self._load_folder(Path(folder))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
