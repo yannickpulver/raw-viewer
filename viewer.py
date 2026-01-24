@@ -527,7 +527,7 @@ class ImageViewer(QMainWindow):
             self.index = index
             self._load_current()
             self._preload_nearby()
-            self._preload_thumbnails()
+            self._preload_all_thumbnails()  # Restart from new position
 
     def _on_preloaded(self, idx: int, pixmap: QPixmap):
         with self.lock:
@@ -542,8 +542,6 @@ class ImageViewer(QMainWindow):
             self.filmstrip.set_thumbnail(idx, thumb)
 
     def _on_thumb_loaded(self, idx: int, pixmap: QPixmap):
-        with self.lock:
-            self.thumb_loading.discard(idx)
         self.filmstrip.set_thumbnail(idx, pixmap)
         # Update rating in filmstrip
         orig_idx = self.all_files.index(self.files[idx])
@@ -566,32 +564,39 @@ class ImageViewer(QMainWindow):
             self.preload_signals.loaded.emit(idx, pixmap)
 
     def _preload_thumb(self, idx: int):
-        # Load rating too
-        orig_idx = self.all_files.index(self.files[idx])
-        if orig_idx not in self.ratings:
-            rating = read_rating(self.files[idx])
-            self.ratings[orig_idx] = rating if rating is not None else 0
+        try:
+            # Load rating too
+            orig_idx = self.all_files.index(self.files[idx])
+            if orig_idx not in self.ratings:
+                rating = read_rating(self.files[idx])
+                self.ratings[orig_idx] = rating if rating is not None else 0
 
-        path = self.files[idx]
-        size = 80
+            path = self.files[idx]
+            size = 80
 
-        # Check disk cache first
-        cached_bytes = self.thumb_cache.get(path, size)
-        if cached_bytes:
-            pixmap = QPixmap()
-            pixmap.loadFromData(cached_bytes)
-            if not pixmap.isNull():
-                self.preload_signals.thumb_loaded.emit(idx, pixmap)
-                return
+            # Check disk cache first
+            cached_bytes = self.thumb_cache.get(path, size)
+            if cached_bytes:
+                pixmap = QPixmap()
+                pixmap.loadFromData(cached_bytes)
+                if not pixmap.isNull():
+                    self.preload_signals.thumb_loaded.emit(idx, pixmap)
+                    return
 
-        # Generate and cache
-        thumb_bytes = extract_thumbnail_bytes(path, size)
-        if thumb_bytes:
-            self.thumb_cache.set(path, size, thumb_bytes)
-            pixmap = QPixmap()
-            pixmap.loadFromData(thumb_bytes)
-            if not pixmap.isNull():
-                self.preload_signals.thumb_loaded.emit(idx, pixmap)
+            # Generate and cache
+            thumb_bytes = extract_thumbnail_bytes(path, size)
+            if thumb_bytes:
+                self.thumb_cache.set(path, size, thumb_bytes)
+                pixmap = QPixmap()
+                pixmap.loadFromData(thumb_bytes)
+                if not pixmap.isNull():
+                    self.preload_signals.thumb_loaded.emit(idx, pixmap)
+        except Exception:
+            pass  # Failed to load this thumbnail
+        finally:
+            # Always remove from loading set to prevent stuck entries
+            with self.lock:
+                self.thumb_loading.discard(idx)
 
     def _preload_nearby(self):
         for offset in [1, -1, 2, -2, 3, -3]:
@@ -622,14 +627,16 @@ class ImageViewer(QMainWindow):
                     self.thumb_executor.submit(self._preload_thumb, idx)
 
     def _preload_all_thumbnails(self):
-        """Progressively load all thumbnails in background."""
+        """Progressively load all thumbnails in background, starting from current index."""
         # Start background preload timer
         if not hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer = QTimer()
             self._bg_preload_timer.timeout.connect(self._background_preload_batch)
-            self._bg_preload_idx = 0
 
-        self._bg_preload_idx = 0
+        # Start from current selection, track where we started
+        self._bg_preload_idx = self.index
+        self._bg_preload_start = self.index
+        self._bg_preload_wrapped = False
         self._bg_preload_timer.start(100)  # Process batch every 100ms
 
     def _background_preload_batch(self):
@@ -640,9 +647,22 @@ class ImageViewer(QMainWindow):
 
         batch_size = 5  # Load 5 at a time
         loaded = 0
+        total = len(self.files)
 
-        while self._bg_preload_idx < len(self.files) and loaded < batch_size:
+        while loaded < batch_size:
             idx = self._bg_preload_idx
+
+            # Check if we've completed full cycle
+            if self._bg_preload_wrapped and idx >= self._bg_preload_start:
+                self._bg_preload_timer.stop()
+                return
+
+            # Wrap around at end
+            if idx >= total:
+                self._bg_preload_idx = 0
+                self._bg_preload_wrapped = True
+                continue
+
             self._bg_preload_idx += 1
 
             # Skip if already loaded or loading
@@ -653,10 +673,6 @@ class ImageViewer(QMainWindow):
 
             self.thumb_executor.submit(self._preload_thumb, idx)
             loaded += 1
-
-        # Stop when done
-        if self._bg_preload_idx >= len(self.files):
-            self._bg_preload_timer.stop()
 
     def _trim_cache(self):
         with self.lock:

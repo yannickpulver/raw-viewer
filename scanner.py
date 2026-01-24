@@ -14,6 +14,9 @@ RAW_EXTENSIONS = {
 
 
 def is_raw_file(path: Path) -> bool:
+    # Skip macOS metadata files (._*)
+    if path.name.startswith('._'):
+        return False
     return path.suffix.lower() in RAW_EXTENSIONS
 
 
