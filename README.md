@@ -42,10 +42,14 @@ Output: `dist/RAW Viewer.app`
 |-----|--------|
 | `←` `→` | Previous / Next image |
 | `0-5` | Set rating (auto-advances) |
-| `Shift+0-5` | Filter by minimum rating |
-| `F` | Toggle info overlay |
+| `Cmd+0-5` | Filter by minimum rating |
+| `F` | Jump to first image |
+| `L` | Jump to last image |
+| `R` | Jump to last rated image |
+| `I` | Toggle info overlay |
 | `O` | Open folder in Finder |
-| `Cmd+Q` | Quit |
-| `Esc` | Quit |
+| `Cmd+S` | Toggle filmstrip |
+| `Esc` | Close folder |
+| `Cmd+Q` / `Cmd+W` | Quit |
 
-Pinch trackpad to zoom, drag to pan.
+Pinch trackpad to zoom, drag to pan. Scroll wheel on filmstrip to scroll horizontally.

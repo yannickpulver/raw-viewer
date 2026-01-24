@@ -59,8 +59,9 @@ class ZoomableImageView(QGraphicsView):
     def set_pixmap(self, pixmap: QPixmap):
         """Set the image to display."""
         self.pixmap_item.setPixmap(pixmap)
-        self.scene.setSceneRect(pixmap.rect().toRectF())
-        self.reset_zoom()
+        if not pixmap.isNull():
+            self.scene.setSceneRect(pixmap.rect().toRectF())
+            self.reset_zoom()
 
     def reset_zoom(self):
         """Fit image to view."""
@@ -313,6 +314,13 @@ class FilmstripWidget(QScrollArea):
         # Initial visible range update
         QTimer.singleShot(0, self._on_scroll_stopped)
 
+    def wheelEvent(self, event: QWheelEvent):
+        """Convert vertical scroll to horizontal scroll."""
+        delta = event.angleDelta().y()
+        self.horizontalScrollBar().setValue(
+            self.horizontalScrollBar().value() - delta
+        )
+
     @property
     def thumbnails(self):
         return self.content.thumbnails
@@ -344,6 +352,7 @@ class ImageViewer(QMainWindow):
         self.cache: Dict[int, QPixmap] = {}
         self.ratings: Dict[int, int] = {}  # Maps original index to rating
         self.show_info = True
+        self.filmstrip_visible = True
         self.min_rating_filter = 0  # 0 = show all
 
         # Preloading - separate executors for previews and thumbnails
@@ -893,14 +902,44 @@ class ImageViewer(QMainWindow):
         # Show filter buttons only when files loaded
         for btn in self.filter_buttons:
             btn.setVisible(has_files)
-        # Show filmstrip only when files loaded
-        self.filmstrip.setVisible(has_files)
+        # Show filmstrip only when files loaded and user hasn't hidden it
+        self.filmstrip.setVisible(has_files and self.filmstrip_visible)
         # Show centered button and recent folders only when no files
         self.open_btn_center.setVisible(not has_files)
         self.recent_container.setVisible(not has_files and len(self.recent_buttons) > 0)
         # Reposition centered button
         if not has_files:
             self._center_open_button()
+
+    def _close_folder(self):
+        """Close current folder and show open folder UI."""
+        if not self.files:
+            return
+        # Stop background preload
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
+        # Clear state
+        self.cache.clear()
+        self.ratings.clear()
+        self.loading.clear()
+        self.thumb_loading.clear()
+        self.filmstrip.thumbnails.clear()
+        self.files = []
+        self.all_files = []
+        self.index = 0
+        self.min_rating_filter = 0
+        # Clear image view
+        self.image_view.set_pixmap(QPixmap())
+        self._update_overlay()
+        self._update_filter_buttons()
+        self._update_empty_state()
+
+    def _toggle_filmstrip(self):
+        """Toggle filmstrip visibility."""
+        if not self.files:
+            return
+        self.filmstrip_visible = not self.filmstrip_visible
+        self.filmstrip.setVisible(self.filmstrip_visible)
 
     def _center_open_button(self):
         """Center the open button and recent folders on screen."""
@@ -981,21 +1020,47 @@ class ImageViewer(QMainWindow):
         elif key in (Qt.Key.Key_0, Qt.Key.Key_1, Qt.Key.Key_2,
                      Qt.Key.Key_3, Qt.Key.Key_4, Qt.Key.Key_5):
             num = key - Qt.Key.Key_0
-            if event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
-                # Shift+number = filter
+            if event.modifiers() in (Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
+                # Cmd+number = filter
                 self._apply_filter(num)
-            else:
+            elif event.modifiers() == Qt.KeyboardModifier.NoModifier:
                 # Number = rate
                 self._set_rating(num)
-        elif key == Qt.Key.Key_F:
+        elif key == Qt.Key.Key_I:
             self.show_info = not self.show_info
             self._update_overlay()
+        elif key == Qt.Key.Key_F:
+            if self.files:
+                self.index = 0
+                self._load_current()
+                self._preload_nearby()
+                self._preload_thumbnails()
+        elif key == Qt.Key.Key_L:
+            if self.files:
+                self.index = len(self.files) - 1
+                self._load_current()
+                self._preload_nearby()
+                self._preload_thumbnails()
+        elif key == Qt.Key.Key_R:
+            if self.files:
+                # Find last rated image in current view
+                for i in range(len(self.files) - 1, -1, -1):
+                    orig_idx = self.all_files.index(self.files[i])
+                    if self.ratings.get(orig_idx, 0) > 0:
+                        self.index = i
+                        self._load_current()
+                        self._preload_nearby()
+                        self._preload_thumbnails()
+                        break
         elif key == Qt.Key.Key_O:
             if self.files:
                 folder = self.files[self.index].parent
                 subprocess.run(['open', str(folder)])
         elif key == Qt.Key.Key_Escape:
-            self.close()
+            self._close_folder()
+        elif key == Qt.Key.Key_S and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
+                                       event.modifiers() == Qt.KeyboardModifier.MetaModifier):
+            self._toggle_filmstrip()
         elif key in (Qt.Key.Key_Q, Qt.Key.Key_W) and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
                                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self.close()
