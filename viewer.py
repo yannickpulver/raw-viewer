@@ -28,6 +28,8 @@ class PreloadSignals(QObject):
     loaded = pyqtSignal(int, QPixmap)
     thumb_loaded = pyqtSignal(int, QPixmap)
     update_available = pyqtSignal(str, str)  # latest_version, download_url
+    folder_scanned = pyqtSignal(list, Path)  # files, folder
+    scan_progress = pyqtSignal(int, int)  # current, total
 
 
 class ZoomableImageView(QGraphicsView):
@@ -62,6 +64,19 @@ class ZoomableImageView(QGraphicsView):
         # Enable native gestures
         self.grabGesture(Qt.GestureType.PinchGesture)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        """Forward to main window."""
+        self.window().dropEvent(event)
 
     def set_pixmap(self, pixmap: QPixmap):
         """Set the image to display."""
@@ -178,6 +193,7 @@ class FilmstripContent(QWidget):
         self.total_count = 0
         self.ratings: Dict[int, int] = {}
         self.setStyleSheet("background-color: transparent;")
+        self.setAcceptDrops(True)
         self._dirty = False
         self._update_timer = QTimer()
         self._update_timer.setSingleShot(True)
@@ -281,6 +297,18 @@ class FilmstripContent(QWidget):
         if 0 <= idx < self.total_count:
             self.clicked.emit(idx)
 
+    def dragEnterEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        """Forward to main window."""
+        self.window().dropEvent(event)
+
 
 class FilmstripWidget(QScrollArea):
     """Horizontal scrollable filmstrip."""
@@ -301,10 +329,12 @@ class FilmstripWidget(QScrollArea):
         self.setFixedHeight(FilmstripContent.THUMB_SIZE + 44)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.content.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAcceptDrops(True)
+        self.content.setAcceptDrops(True)
         self.setStyleSheet("""
             QScrollArea { background-color: rgba(0, 0, 0, 200); border: none; }
-            QScrollBar:horizontal { height: 12px; background: #222; }
-            QScrollBar::handle:horizontal { background: #666; border-radius: 4px; min-width: 30px; }
+            QScrollBar:horizontal { height: 6px; background: #222; }
+            QScrollBar::handle:horizontal { background: #666; border-radius: 3px; min-width: 30px; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
         """)
 
@@ -330,11 +360,21 @@ class FilmstripWidget(QScrollArea):
         QTimer.singleShot(0, self._on_scroll_stopped)
 
     def wheelEvent(self, event: QWheelEvent):
-        """Convert vertical scroll to horizontal scroll."""
-        delta = event.angleDelta().y()
-        self.horizontalScrollBar().setValue(
-            self.horizontalScrollBar().value() - delta
-        )
+        """Handle scroll - use horizontal, or convert vertical to horizontal."""
+        # Prefer pixelDelta for smooth trackpad scrolling
+        px = event.pixelDelta()
+        if not px.isNull():
+            # Use horizontal scroll directly, ignore vertical
+            delta = px.x()
+        else:
+            # Mouse wheel: convert vertical to horizontal
+            delta = event.angleDelta().y()
+
+        if delta != 0:
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta
+            )
+        event.accept()
 
     @property
     def thumbnails(self):
@@ -354,6 +394,18 @@ class FilmstripWidget(QScrollArea):
 
     def set_rating(self, index: int, rating: int):
         self.content.set_rating(index, rating)
+
+    def dragEnterEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        """Forward to main window."""
+        self.window().dropEvent(event)
 
 
 class ImageViewer(QMainWindow):
@@ -375,6 +427,8 @@ class ImageViewer(QMainWindow):
         self.preload_signals.loaded.connect(self._on_preloaded)
         self.preload_signals.thumb_loaded.connect(self._on_thumb_loaded)
         self.preload_signals.update_available.connect(self._on_update_available)
+        self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
+        self.preload_signals.scan_progress.connect(self._on_scan_progress)
         self.executor = ThreadPoolExecutor(max_workers=4)  # Main previews
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.loading: set = set()
@@ -472,6 +526,41 @@ class ImageViewer(QMainWindow):
         self.update_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_url = None
 
+        # Help overlay
+        help_text = """
+  Keyboard Shortcuts
+
+  ←/→         Navigate images
+  0-5          Rate current image
+  ⌘0-5        Filter by rating
+
+  S            Go to start
+  E            Go to end
+  R            Go to last rated
+
+  I            Toggle info overlay
+  ⌘S          Toggle filmstrip
+  H            Toggle this help
+
+  O            Show in Finder
+  ⌘L          Open all in Lightroom
+  Esc          Close folder
+  ⌘Q          Quit
+"""
+        self.help_label = QLabel(help_text.strip(), self)
+        self.help_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(0, 0, 0, 200);
+                color: #ddd;
+                padding: 20px 30px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 13px;
+                line-height: 1.6;
+            }
+        """)
+        self.help_label.adjustSize()
+        self.help_label.setVisible(False)
+
         # Title label (centered in title bar)
         self.title_label = QLabel("RAW Viewer", self)
         self.title_label.setStyleSheet("""
@@ -555,6 +644,20 @@ class ImageViewer(QMainWindow):
         """)
         self.open_btn_center.clicked.connect(self._open_folder)
         self.open_btn_center.adjustSize()
+
+        # Scanning indicator (shown while loading folder)
+        self.scanning_label = QLabel("Scanning folder...", self)
+        self.scanning_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(40, 40, 40, 220);
+                color: #aaa;
+                padding: 15px 30px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 14px;
+            }
+        """)
+        self.scanning_label.adjustSize()
+        self.scanning_label.setVisible(False)
 
         # Recent folders container
         self.recent_container = QWidget(self)
@@ -916,10 +1019,38 @@ class ImageViewer(QMainWindow):
         self._load_folder(Path(folder_str))
 
     def _load_folder(self, folder: Path):
-        """Load files from folder."""
-        files = scan_folder(folder)
+        """Load files from folder (async scan)."""
+        # Show scanning indicator
+        self.open_btn_center.setVisible(False)
+        self.recent_container.setVisible(False)
+        self.scanning_label.setText("Scanning folder...")
+        self.scanning_label.adjustSize()
+        self.scanning_label.setVisible(True)
+        self._center_scanning_label()
+
+        # Scan in background with progress
+        def progress(current, total):
+            self.preload_signals.scan_progress.emit(current, total)
+
+        def scan():
+            files = scan_folder(folder, progress_callback=progress)
+            self.preload_signals.folder_scanned.emit(files, folder)
+
+        threading.Thread(target=scan, daemon=True).start()
+
+    def _on_scan_progress(self, current: int, total: int):
+        """Update scanning progress."""
+        pct = int(current / total * 100)
+        self.scanning_label.setText(f"Sorting by date... {pct}%")
+        self.scanning_label.adjustSize()
+        self._center_scanning_label()
+
+    def _on_folder_scanned(self, files: list, folder: Path):
+        """Handle folder scan completion."""
+        self.scanning_label.setVisible(False)
 
         if not files:
+            self._update_empty_state()
             return
 
         # Save to recent folders
@@ -1015,6 +1146,18 @@ class ImageViewer(QMainWindow):
         rc_y = btn_y + self.open_btn_center.height() + 15
         self.recent_container.move(rc_x, rc_y)
 
+    def _center_scanning_label(self):
+        """Center the scanning label on screen."""
+        x = (self.width() - self.scanning_label.width()) // 2
+        y = (self.height() - self.scanning_label.height()) // 2
+        self.scanning_label.move(x, y)
+
+    def _center_help_label(self):
+        """Center the help label on screen."""
+        x = (self.width() - self.help_label.width()) // 2
+        y = (self.height() - self.help_label.height()) // 2
+        self.help_label.move(x, y)
+
     def _update_recent_folders_ui(self):
         """Update recent folders buttons."""
         # Clear existing buttons
@@ -1072,6 +1215,12 @@ class ImageViewer(QMainWindow):
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
+        # Center scanning label if visible
+        if self.scanning_label.isVisible():
+            self._center_scanning_label()
+        # Center help label if visible
+        if self.help_label.isVisible():
+            self._center_help_label()
 
     def mousePressEvent(self, event: QMouseEvent):
         """Handle clicks on update label and title bar dragging."""
@@ -1104,6 +1253,15 @@ class ImageViewer(QMainWindow):
 
     def dragEnterEvent(self, event):
         """Accept folder drops."""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and Path(url.toLocalFile()).is_dir():
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dragMoveEvent(self, event):
+        """Accept folder drops during drag."""
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
                 if url.isLocalFile() and Path(url.toLocalFile()).is_dir():
@@ -1182,6 +1340,9 @@ class ImageViewer(QMainWindow):
         elif key in (Qt.Key.Key_Q, Qt.Key.Key_W) and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
                                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self.close()
+        elif key == Qt.Key.Key_H:
+            self.help_label.setVisible(not self.help_label.isVisible())
+            self._center_help_label()
         else:
             super().keyPressEvent(event)
 

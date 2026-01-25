@@ -45,6 +45,6 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='RAW Viewer.app',
-    icon=None,
+    icon='icon.icns',
     bundle_identifier=None,
 )

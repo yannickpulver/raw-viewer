@@ -4,14 +4,19 @@ Fast RAW image viewer for photo culling with Lightroom-compatible ratings.
 
 ![Screenshot](docs/screenshot.png)
 
+## Download
+
+Get the latest release from the [Releases](https://github.com/yannickpulver/raw-viewer/releases) page.
+
 ## Features
 
-- Load RAW files from folder (recursive)
+- Load RAW files from folder (recursive) or drag-drop
 - Fast preview using embedded JPEGs
 - Star ratings (0-5) saved to XMP sidecar files
 - Filmstrip navigation
-- Pinch-to-zoom
+- Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
+- Auto-update notifications
 
 ## Install
 
