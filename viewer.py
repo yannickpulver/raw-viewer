@@ -6,6 +6,10 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import subprocess
 import platform
+import urllib.request
+import json
+
+from version import VERSION
 
 from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
@@ -23,6 +27,7 @@ class PreloadSignals(QObject):
     """Signals for background preloading."""
     loaded = pyqtSignal(int, QPixmap)
     thumb_loaded = pyqtSignal(int, QPixmap)
+    update_available = pyqtSignal(str, str)  # latest_version, download_url
 
 
 class ZoomableImageView(QGraphicsView):
@@ -361,6 +366,7 @@ class ImageViewer(QMainWindow):
         self.preload_signals = PreloadSignals()
         self.preload_signals.loaded.connect(self._on_preloaded)
         self.preload_signals.thumb_loaded.connect(self._on_thumb_loaded)
+        self.preload_signals.update_available.connect(self._on_update_available)
         self.executor = ThreadPoolExecutor(max_workers=4)  # Main previews
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.loading: set = set()
@@ -442,6 +448,21 @@ class ImageViewer(QMainWindow):
             }
         """)
         self.filter_label.setVisible(False)
+
+        # Update available label
+        self.update_label = QLabel(self)
+        self.update_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(80, 180, 80, 220);
+                color: white;
+                padding: 4px 10px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 11px;
+            }
+        """)
+        self.update_label.setVisible(False)
+        self.update_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_url = None
 
         # Title label (centered in title bar)
         self.title_label = QLabel("RAW Viewer", self)
@@ -543,6 +564,9 @@ class ImageViewer(QMainWindow):
 
         # Update UI state
         self._update_empty_state()
+
+        # Check for updates in background
+        threading.Thread(target=self._check_for_updates, daemon=True).start()
 
         # Load initial
         if self.files:
@@ -1041,8 +1065,15 @@ class ImageViewer(QMainWindow):
             self._center_open_button()
 
     def mousePressEvent(self, event: QMouseEvent):
-        """Start drag if clicking in title bar area."""
-        if event.button() == Qt.MouseButton.LeftButton and event.position().y() < 40:
+        """Handle clicks on update label and title bar dragging."""
+        pos = event.position()
+        # Check for update label click
+        if self.update_label.isVisible() and self.update_label.geometry().contains(int(pos.x()), int(pos.y())):
+            if self.update_url:
+                subprocess.run(['open', self.update_url])
+            return
+        # Title bar drag
+        if event.button() == Qt.MouseButton.LeftButton and pos.y() < 40:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()
         else:
@@ -1171,3 +1202,27 @@ class ImageViewer(QMainWindow):
         self.executor.shutdown(wait=False)
         self.thumb_executor.shutdown(wait=False)
         super().closeEvent(event)
+
+    def _check_for_updates(self):
+        """Check GitHub for newer releases."""
+        if VERSION == "dev":
+            return
+        try:
+            url = "https://api.github.com/repos/yannickpulver/raw-viewer/releases/latest"
+            req = urllib.request.Request(url, headers={"User-Agent": "RAW-Viewer"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                latest = data.get("tag_name", "")
+                if latest and latest != VERSION:
+                    download_url = data.get("html_url", "")
+                    self.preload_signals.update_available.emit(latest, download_url)
+        except Exception:
+            pass
+
+    def _on_update_available(self, latest: str, download_url: str):
+        """Show update available label."""
+        self.update_label.setText(f"Update available: {latest}")
+        self.update_label.adjustSize()
+        self.update_label.move(10, 40)
+        self.update_label.setVisible(True)
+        self.update_url = download_url

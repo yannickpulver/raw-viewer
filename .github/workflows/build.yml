@@ -23,6 +23,14 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Generate version
+        id: version
+        run: echo "version=$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Write version file
+        run: |
+          echo "VERSION = \"v${{ steps.version.outputs.version }}\"" > version.py
+
       - name: Build app
         run: pyinstaller "RAW Viewer.spec" --noconfirm
 
@@ -30,10 +38,6 @@ jobs:
         run: |
           cd dist
           zip -r "RAW-Viewer.zip" "RAW Viewer.app"
-
-      - name: Generate version
-        id: version
-        run: echo "version=$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
