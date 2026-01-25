@@ -1,0 +1,44 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build app
+        run: pyinstaller "RAW Viewer.spec" --noconfirm
+
+      - name: Zip app bundle
+        run: |
+          cd dist
+          zip -r "RAW-Viewer.zip" "RAW Viewer.app"
+
+      - name: Generate version
+        id: version
+        run: echo "version=$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: RAW Viewer ${{ steps.version.outputs.version }}
+          files: dist/RAW-Viewer.zip
+          generate_release_notes: true

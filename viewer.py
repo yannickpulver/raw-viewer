@@ -13,7 +13,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
 from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes
 from rating import read_rating, write_rating
-from scanner import scan_folder
+from scanner import scan_folder, get_creation_time
+from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
 
@@ -763,12 +764,15 @@ class ImageViewer(QMainWindow):
         self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
         self.pos_label.setVisible(self.show_info)
 
-        # Below position: filename and rating
-        filename = self.files[self.index].name
-        orig_idx = self.all_files.index(self.files[self.index])
+        # Below position: filename, date, and rating
+        current_file = self.files[self.index]
+        filename = current_file.name
+        creation_time = get_creation_time(current_file)
+        date_str = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M")
+        orig_idx = self.all_files.index(current_file)
         rating = self.ratings.get(orig_idx, 0)
         stars = "★" * rating + "☆" * (5 - rating) if rating else "☆☆☆☆☆"
-        self.info_label.setText(f"{filename}  |  {stars}")
+        self.info_label.setText(f"{filename}  |  {date_str}  |  {stars}")
         self.info_label.adjustSize()
         self.info_label.move(self.width() - self.info_label.width() - 10, 10 + self.pos_label.height())
         self.info_label.setVisible(self.show_info)
@@ -959,6 +963,11 @@ class ImageViewer(QMainWindow):
             return
         self.filmstrip_visible = not self.filmstrip_visible
         self.filmstrip.setVisible(self.filmstrip_visible)
+        # Reposition filter buttons
+        filmstrip_height = self.filmstrip.height() if self.filmstrip_visible else 0
+        btn_y = self.height() - filmstrip_height - self.filter_buttons_widget.height() - 10
+        btn_x = self.width() - self.filter_buttons_widget.width() - 10
+        self.filter_buttons_widget.move(btn_x, btn_y)
 
     def _center_open_button(self):
         """Center the open button and recent folders on screen."""
@@ -1086,6 +1095,8 @@ class ImageViewer(QMainWindow):
                 self._preload_thumbnails()
         elif key == Qt.Key.Key_R:
             if self.files:
+                # Ensure all ratings are loaded
+                self._load_all_ratings()
                 # Find last rated image in current view
                 for i in range(len(self.files) - 1, -1, -1):
                     orig_idx = self.all_files.index(self.files[i])
@@ -1097,8 +1108,7 @@ class ImageViewer(QMainWindow):
                         break
         elif key == Qt.Key.Key_O:
             if self.files:
-                folder = self.files[self.index].parent
-                subprocess.run(['open', str(folder)])
+                subprocess.run(['open', '-R', str(self.files[self.index])])
         elif key == Qt.Key.Key_Escape:
             self._close_folder()
         elif key == Qt.Key.Key_S and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
