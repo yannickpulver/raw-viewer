@@ -106,10 +106,18 @@ class ZoomableImageView(QGraphicsView):
         return super().event(event)
 
     def wheelEvent(self, event: QWheelEvent):
-        """Handle scroll for panning."""
-        # Two-finger scroll = pan
+        """Handle scroll for panning or navigation."""
         dx = event.pixelDelta().x()
         dy = event.pixelDelta().y()
+
+        # When not zoomed, horizontal scroll navigates images
+        if abs(self.zoom_factor - 1.0) < 0.01:
+            if abs(dx) > 30:  # Horizontal swipe threshold
+                self.parent().window()._on_scroll_navigate(-1 if dx > 0 else 1)
+            event.accept()
+            return
+
+        # When zoomed, pan
         if dx != 0 or dy != 0:
             self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - dx)
             self.verticalScrollBar().setValue(self.verticalScrollBar().value() - dy)
@@ -561,6 +569,7 @@ class ImageViewer(QMainWindow):
         self.setStyleSheet("background-color: black;")
         self.resize(1400, 900)
         self._titlebar_configured = False
+        self.setAcceptDrops(True)
 
         # Update UI state
         self._update_empty_state()
@@ -1093,6 +1102,26 @@ class ImageViewer(QMainWindow):
             self._drag_pos = None
         super().mouseReleaseEvent(event)
 
+    def dragEnterEvent(self, event):
+        """Accept folder drops."""
+        if event.mimeData().hasUrls():
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and Path(url.toLocalFile()).is_dir():
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dropEvent(self, event):
+        """Open dropped folder."""
+        for url in event.mimeData().urls():
+            if url.isLocalFile():
+                path = Path(url.toLocalFile())
+                if path.is_dir():
+                    self._load_folder(path)
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
 
@@ -1112,13 +1141,18 @@ class ImageViewer(QMainWindow):
         elif key == Qt.Key.Key_I:
             self.show_info = not self.show_info
             self._update_overlay()
-        elif key == Qt.Key.Key_F:
+        elif key == Qt.Key.Key_S and event.modifiers() == Qt.KeyboardModifier.NoModifier:
             if self.files:
                 self.index = 0
                 self._load_current()
                 self._preload_nearby()
                 self._preload_thumbnails()
-        elif key == Qt.Key.Key_L:
+        elif key == Qt.Key.Key_L and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
+                                       event.modifiers() == Qt.KeyboardModifier.MetaModifier):
+            if self.files:
+                # Open all files in Lightroom
+                subprocess.run(['open', '-a', 'Adobe Lightroom Classic'] + [str(f) for f in self.files])
+        elif key == Qt.Key.Key_E:
             if self.files:
                 self.index = len(self.files) - 1
                 self._load_current()
@@ -1158,6 +1192,16 @@ class ImageViewer(QMainWindow):
             self._load_current()
             self._preload_nearby()
             self._preload_thumbnails()
+
+    def _on_scroll_navigate(self, delta: int):
+        """Handle scroll-based navigation with debouncing."""
+        if not hasattr(self, '_last_scroll_time'):
+            self._last_scroll_time = 0
+        import time
+        current = time.time()
+        if current - self._last_scroll_time > 0.2:  # 200ms debounce
+            self._last_scroll_time = current
+            self._navigate(delta)
 
     def _set_rating(self, rating: int):
         if not self.files:
