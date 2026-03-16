@@ -566,19 +566,65 @@ class ImageViewer(QMainWindow):
   Esc          Close folder
   ⌘Q          Quit
 """
-        self.help_label = QLabel(help_text.strip(), self)
-        self.help_label.setStyleSheet("""
+        self.help_label = QWidget(self)
+        self.help_label.setStyleSheet("background-color: rgba(0, 0, 0, 200);")
+        help_layout = QVBoxLayout(self.help_label)
+        help_layout.setContentsMargins(20, 15, 20, 20)
+        help_layout.setSpacing(8)
+        # Title row with close button
+        title_row = QHBoxLayout()
+        title_label = QLabel("Keyboard Shortcuts")
+        title_label.setStyleSheet("""
             QLabel {
-                background-color: rgba(0, 0, 0, 200);
-                color: #ddd;
-                padding: 20px 30px;
+                background: transparent; color: #ddd;
                 font-family: Menlo, Monaco, monospace;
-                font-size: 13px;
-                line-height: 1.6;
+                font-size: 13px; font-weight: bold;
             }
         """)
+        close_btn = QPushButton("✕")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #999; border: none;
+                font-size: 16px; padding: 0px;
+            }
+            QPushButton:hover { color: white; }
+        """)
+        close_btn.setFixedSize(24, 24)
+        close_btn.clicked.connect(self._toggle_help)
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+        title_row.addWidget(close_btn)
+        help_layout.addLayout(title_row)
+        # Help text (without the title line)
+        shortcuts_text = "\n".join(help_text.strip().split("\n")[1:]).strip()
+        help_content = QLabel(shortcuts_text)
+        help_content.setStyleSheet("""
+            QLabel {
+                background: transparent; color: #ddd;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 13px; line-height: 1.6;
+            }
+        """)
+        help_layout.addWidget(help_content)
         self.help_label.adjustSize()
         self.help_label.setVisible(False)
+
+        # Snackbar
+        self.snackbar = QLabel(self)
+        self.snackbar.setStyleSheet("""
+            QLabel {
+                background-color: rgba(50, 50, 50, 220);
+                color: #ddd;
+                padding: 8px 16px;
+                font-family: 'SF Pro Text', 'Helvetica Neue', sans-serif;
+                font-size: 12px;
+                border-radius: 4px;
+            }
+        """)
+        self.snackbar.setVisible(False)
+        self._snackbar_timer = QTimer(self)
+        self._snackbar_timer.setSingleShot(True)
+        self._snackbar_timer.timeout.connect(lambda: self.snackbar.setVisible(False))
 
         # Title label (centered in title bar)
         self.title_label = QLabel("RAW Viewer", self)
@@ -1180,6 +1226,10 @@ class ImageViewer(QMainWindow):
         """Toggle between RAW and JPEG view modes."""
         if not self._current_folder:
             return
+        # Don't switch to JPEG if no JPEGs available
+        if self.view_mode == "raw" and not self.jpeg_files:
+            self._show_snackbar("No JPEG files found in this folder")
+            return
 
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
@@ -1283,6 +1333,18 @@ class ImageViewer(QMainWindow):
         if self.help_label.isVisible():
             self.help_label.raise_()
         self._center_help_label()
+
+    def _show_snackbar(self, text: str, duration: int = 2000):
+        """Show a temporary snackbar message at the bottom center."""
+        self.snackbar.setText(text)
+        self.snackbar.adjustSize()
+        filmstrip_height = self.filmstrip.height() if self.filmstrip.isVisible() else 0
+        x = (self.width() - self.snackbar.width()) // 2
+        y = self.height() - filmstrip_height - self.snackbar.height() - 20
+        self.snackbar.move(x, y)
+        self.snackbar.setVisible(True)
+        self.snackbar.raise_()
+        self._snackbar_timer.start(duration)
 
     def _update_recent_folders_ui(self):
         """Update recent folders buttons."""
