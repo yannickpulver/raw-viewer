@@ -127,8 +127,7 @@ jobs:
       - name: Re-zip after stapling
         run: |
           rm dist/RAW-Viewer.zip
-          cd dist
-          zip -r "RAW-Viewer.zip" "RAW Viewer.app"
+          ditto -c -k --keepParent "dist/RAW Viewer.app" "dist/RAW-Viewer.zip"
 
       - name: Create Release
         if: github.ref == 'refs/heads/main'
