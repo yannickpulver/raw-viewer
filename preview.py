@@ -78,7 +78,7 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
             except rawpy.LibRawNoThumbnailError:
                 pass
 
-            # Fallback: quick half-size postprocess
+            # Fallback: full postprocess when no embedded thumb at all
             if pixmap is None:
                 rgb = raw.postprocess(
                     half_size=True,
@@ -105,6 +105,48 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
 
     except Exception as e:
         print(f"Error loading {path}: {e}")
+        return None
+
+
+MIN_PREVIEW_WIDTH = 640
+
+
+def needs_full_render(pixmap: Optional[QPixmap]) -> bool:
+    """Check if a preview pixmap is too small and needs full RAW postprocessing."""
+    return pixmap is not None and pixmap.width() < MIN_PREVIEW_WIDTH
+
+
+def render_full_preview(path: Path) -> Optional[QPixmap]:
+    """Full RAW postprocess for files with small embedded previews (e.g. DJI DNG)."""
+    try:
+        with rawpy.imread(str(path)) as raw:
+            orientation = raw.sizes.flip
+            orientation_map = {0: 1, 3: 3, 5: 8, 6: 6}
+            exif_orientation = orientation_map.get(orientation, 1)
+
+            rgb = raw.postprocess(
+                half_size=True,
+                use_camera_wb=True,
+                no_auto_bright=True,
+                output_bps=8,
+                output_color=rawpy.ColorSpace.sRGB,
+            )
+            h, w = rgb.shape[:2]
+            image = QImage(
+                rgb.tobytes(),
+                w, h,
+                3 * w,
+                QImage.Format.Format_RGB888
+            )
+            pixmap = QPixmap.fromImage(image.copy())
+
+            if exif_orientation != 1:
+                transform = get_orientation_transform(exif_orientation)
+                pixmap = pixmap.transformed(transform)
+
+            return pixmap
+    except Exception as e:
+        print(f"Error rendering full preview {path}: {e}")
         return None
 
 

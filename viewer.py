@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayo
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
-from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes
+from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview
 from rating import read_rating, write_rating, set_green_tag
 from scanner import scan_folder, scan_folder_jpeg, get_creation_time
 from datetime import datetime
@@ -409,7 +409,7 @@ class FilmstripWidget(QScrollArea):
 
 
 class ImageViewer(QMainWindow):
-    CACHE_SIZE = 7
+    CACHE_SIZE = 15
 
     def __init__(self, files: Optional[List[Path]] = None):
         super().__init__()
@@ -446,8 +446,10 @@ class ImageViewer(QMainWindow):
         self.preload_signals.update_available.connect(self._on_update_available)
         self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
         self.preload_signals.scan_progress.connect(self._on_scan_progress)
-        self.executor = ThreadPoolExecutor(max_workers=4)  # Main previews
+        self.current_executor = ThreadPoolExecutor(max_workers=1)  # Current image (highest priority)
+        self.executor = ThreadPoolExecutor(max_workers=6)  # Nearby preloads
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
+        self.render_executor = ThreadPoolExecutor(max_workers=1)  # Full RAW renders (low priority)
         self.loading: set = set()
         self.thumb_loading: set = set()
         self.thumb_failed: set = set()  # Track failed thumbnails for progress
@@ -767,8 +769,7 @@ class ImageViewer(QMainWindow):
 
     def _on_preloaded(self, idx: int, pixmap: QPixmap):
         with self.lock:
-            if idx not in self.cache:
-                self.cache[idx] = pixmap
+            self.cache[idx] = pixmap
             self.loading.discard(idx)
         if idx == self.index and pixmap:
             self._display(pixmap)
@@ -801,6 +802,12 @@ class ImageViewer(QMainWindow):
 
     def _preload_one(self, idx: int):
         pixmap = self._load_sync(idx)
+        if pixmap:
+            self.preload_signals.loaded.emit(idx, pixmap)
+
+    def _render_full(self, idx: int):
+        """Background full render for files with small embedded previews."""
+        pixmap = render_full_preview(self.files[idx])
         if pixmap:
             self.preload_signals.loaded.emit(idx, pixmap)
 
@@ -844,7 +851,7 @@ class ImageViewer(QMainWindow):
                     self.thumb_failed.add(idx)
 
     def _preload_nearby(self):
-        for offset in [1, -1, 2, -2, 3, -3]:
+        for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]:
             idx = self.index + offset
             with self.lock:
                 if 0 <= idx < len(self.files) and idx not in self.cache and idx not in self.loading:
@@ -935,15 +942,16 @@ class ImageViewer(QMainWindow):
         if pixmap:
             self._display(pixmap)
         else:
-            pixmap = self._load_sync(self.index)
-            if pixmap:
-                with self.lock:
-                    self.cache[self.index] = pixmap
-                self._display(pixmap)
-                # Generate thumbnail too
-                if self.index not in self.filmstrip.thumbnails:
-                    thumb = pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
-                    self.filmstrip.set_thumbnail(self.index, thumb)
+            # Show filmstrip thumbnail as placeholder if available
+            thumb_pixmap = self.filmstrip.thumbnails.get(self.index)
+            if thumb_pixmap:
+                self._display(thumb_pixmap)
+            # Load preview on dedicated executor (skips preload queue)
+            idx = self.index
+            with self.lock:
+                if idx not in self.loading:
+                    self.loading.add(idx)
+                    self.current_executor.submit(self._preload_one, idx)
 
         # Load rating (use original index)
         orig_idx = self.all_files.index(self.files[self.index])
