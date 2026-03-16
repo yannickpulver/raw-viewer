@@ -643,15 +643,14 @@ class ImageViewer(QMainWindow):
             filter_layout.addWidget(btn)
             self.filter_buttons.append(btn)
 
-        # Help button
-        filter_layout.addSpacing(10)
-        self.help_btn = QPushButton("?")
-        self.help_btn.setStyleSheet(button_style)
-        self.help_btn.clicked.connect(self._toggle_help)
-        filter_layout.addWidget(self.help_btn)
-
         self.filter_buttons[0].setChecked(True)
         self.filter_buttons_widget.adjustSize()
+
+        # Help button (standalone, bottom-left, always visible)
+        self.help_btn = QPushButton("?", self)
+        self.help_btn.setStyleSheet(button_style)
+        self.help_btn.clicked.connect(self._toggle_help)
+        self.help_btn.adjustSize()
 
         # Centered open button (shown when no files)
         self.open_btn_center = QPushButton("📂 Open Folder", self)
@@ -1339,6 +1338,8 @@ class ImageViewer(QMainWindow):
         btn_y = self.height() - filmstrip_height - self.filter_buttons_widget.height() - 10
         btn_x = self.width() - self.filter_buttons_widget.width() - 10
         self.filter_buttons_widget.move(btn_x, btn_y)
+        # Position help button bottom-left, above filmstrip
+        self.help_btn.move(10, btn_y)
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
