@@ -1131,9 +1131,8 @@ class ImageViewer(QMainWindow):
     def _update_empty_state(self):
         """Show/hide UI elements based on whether files are loaded."""
         has_files = len(self.files) > 0
-        # Show filter buttons only when files loaded
-        for btn in self.filter_buttons:
-            btn.setVisible(has_files)
+        # Show entire filter toolbar only when files loaded
+        self.filter_buttons_widget.setVisible(has_files)
         # Show filmstrip only when files loaded and user hasn't hidden it
         self.filmstrip.setVisible(has_files and self.filmstrip_visible)
         # Show centered button and recent folders only when no files
