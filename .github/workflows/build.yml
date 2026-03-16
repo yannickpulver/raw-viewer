@@ -80,7 +80,12 @@ jobs:
             --wait
 
       - name: Staple app
-        run: xcrun stapler staple "dist/RAW Viewer.app"
+        run: |
+          for i in 1 2 3; do
+            xcrun stapler staple "dist/RAW Viewer.app" && break
+            echo "Staple attempt $i failed, waiting 15s..."
+            sleep 15
+          done
 
       - name: Re-zip after stapling
         run: |
