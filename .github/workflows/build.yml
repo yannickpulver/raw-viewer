@@ -101,19 +101,29 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
-          xcrun notarytool submit "dist/RAW-Viewer.zip" \
+          OUTPUT=$(xcrun notarytool submit "dist/RAW-Viewer.zip" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_PASSWORD" \
-            --wait
+            --wait 2>&1)
+          echo "$OUTPUT"
+          # Extract submission ID and fetch log on failure
+          SUBMISSION_ID=$(echo "$OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+          if echo "$OUTPUT" | grep -q "status: Invalid"; then
+            echo "Notarization failed! Fetching log..."
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "status: Accepted"; then
+            echo "Notarization did not succeed. Status unknown."
+            exit 1
+          fi
 
       - name: Staple app
-        run: |
-          for i in 1 2 3; do
-            xcrun stapler staple "dist/RAW Viewer.app" && break
-            echo "Staple attempt $i failed, waiting 15s..."
-            sleep 15
-          done
+        run: xcrun stapler staple "dist/RAW Viewer.app"
 
       - name: Re-zip after stapling
         run: |
