@@ -1,6 +1,8 @@
-"""Read/write XMP sidecar files for ratings."""
+"""Read/write XMP sidecar files for ratings and macOS Finder tags."""
 
 import re
+import plistlib
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -74,4 +76,58 @@ def write_rating(raw_path: Path, rating: int) -> bool:
         return True
     except Exception as e:
         print(f"Error writing XMP for {raw_path}: {e}")
+        return False
+
+
+_XATTR_TAGS_KEY = "com.apple.metadata:_kMDItemUserTags"
+_GREEN_TAG = "Green\n2"
+
+
+def read_finder_tags(path: Path) -> list[str]:
+    """Read macOS Finder tags from a file."""
+    try:
+        result = subprocess.run(
+            ["xattr", "-px", _XATTR_TAGS_KEY, str(path)],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            return []
+        raw_hex = result.stdout.replace(" ", "").replace("\n", "")
+        return plistlib.loads(bytes.fromhex(raw_hex))
+    except Exception:
+        return []
+
+
+def has_green_tag(path: Path) -> bool:
+    """Check if file has a green Finder tag."""
+    return any("Green" in t for t in read_finder_tags(path))
+
+
+def set_green_tag(path: Path, enabled: bool) -> bool:
+    """Add or remove green Finder tag."""
+    try:
+        tags = read_finder_tags(path)
+        green_tags = [t for t in tags if "Green" in t]
+
+        if enabled and not green_tags:
+            tags.append(_GREEN_TAG)
+        elif not enabled and green_tags:
+            tags = [t for t in tags if "Green" not in t]
+        else:
+            return True
+
+        if tags:
+            plist_hex = plistlib.dumps(tags, fmt=plistlib.FMT_BINARY).hex()
+            subprocess.run(
+                ["xattr", "-wx", _XATTR_TAGS_KEY, plist_hex, str(path)],
+                check=True
+            )
+        else:
+            subprocess.run(
+                ["xattr", "-d", _XATTR_TAGS_KEY, str(path)],
+                check=True
+            )
+        return True
+    except Exception as e:
+        print(f"Error setting Finder tag for {path}: {e}")
         return False

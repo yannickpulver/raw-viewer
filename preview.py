@@ -3,8 +3,9 @@
 from pathlib import Path
 from typing import Optional, Tuple
 import rawpy
-from PyQt6.QtGui import QImage, QPixmap, QTransform
-from PyQt6.QtCore import QByteArray, QBuffer, QIODevice, Qt
+import exifread
+from PyQt6.QtGui import QImage, QPixmap, QTransform, QImageReader
+from PyQt6.QtCore import QByteArray, QBuffer, QIODevice, Qt, QSize
 
 
 def get_orientation_transform(orientation: int) -> QTransform:
@@ -171,6 +172,75 @@ def extract_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> O
         return None
 
     # Convert to JPEG bytes
+    byte_array = QByteArray()
+    buffer = QBuffer(byte_array)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    pixmap.save(buffer, "JPEG", quality)
+    buffer.close()
+    return bytes(byte_array.data())
+
+
+def _get_jpeg_orientation(path: Path) -> int:
+    """Read EXIF orientation from JPEG file."""
+    try:
+        with open(path, 'rb') as f:
+            tags = exifread.process_file(f, stop_tag='Image Orientation', details=False)
+            if 'Image Orientation' in tags:
+                return tags['Image Orientation'].values[0]
+    except Exception:
+        pass
+    return 1
+
+
+def load_jpeg_preview(path: Path, max_size: int = 2560) -> Optional[QPixmap]:
+    """Load JPEG file as QPixmap, downscaled for display performance."""
+    try:
+        reader = QImageReader(str(path))
+        reader.setAutoTransform(True)
+        orig_size = reader.size()
+        if orig_size.isValid():
+            # Downsample large images on decode
+            scale = min(max_size / max(orig_size.width(), orig_size.height(), 1), 1.0)
+            if scale < 1.0:
+                reader.setScaledSize(QSize(
+                    int(orig_size.width() * scale),
+                    int(orig_size.height() * scale)
+                ))
+        image = reader.read()
+        if image.isNull():
+            return None
+        return QPixmap.fromImage(image)
+    except Exception as e:
+        print(f"Error loading JPEG {path}: {e}")
+        return None
+
+
+def load_jpeg_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
+    """Load JPEG thumbnail for filmstrip, downscaled on decode."""
+    try:
+        reader = QImageReader(str(path))
+        reader.setAutoTransform(True)
+        orig_size = reader.size()
+        if orig_size.isValid():
+            # Scale down to thumbnail size during decode
+            reader.setScaledSize(orig_size.scaled(
+                QSize(size, size),
+                Qt.AspectRatioMode.KeepAspectRatio
+            ))
+        image = reader.read()
+        if image.isNull():
+            return None
+        return QPixmap.fromImage(image)
+    except Exception as e:
+        print(f"Error loading JPEG thumbnail {path}: {e}")
+        return None
+
+
+def load_jpeg_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> Optional[bytes]:
+    """Load JPEG thumbnail as bytes for caching."""
+    pixmap = load_jpeg_thumbnail(path, size)
+    if pixmap is None:
+        return None
     byte_array = QByteArray()
     buffer = QBuffer(byte_array)
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
