@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayo
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
-from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes
+from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview
 from rating import read_rating, write_rating, set_green_tag
 from scanner import scan_folder, scan_folder_jpeg, get_creation_time
 from datetime import datetime
@@ -409,7 +409,7 @@ class FilmstripWidget(QScrollArea):
 
 
 class ImageViewer(QMainWindow):
-    CACHE_SIZE = 7
+    CACHE_SIZE = 15
 
     def __init__(self, files: Optional[List[Path]] = None):
         super().__init__()
@@ -446,8 +446,10 @@ class ImageViewer(QMainWindow):
         self.preload_signals.update_available.connect(self._on_update_available)
         self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
         self.preload_signals.scan_progress.connect(self._on_scan_progress)
-        self.executor = ThreadPoolExecutor(max_workers=4)  # Main previews
+        self.current_executor = ThreadPoolExecutor(max_workers=1)  # Current image (highest priority)
+        self.executor = ThreadPoolExecutor(max_workers=6)  # Nearby preloads
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
+        self.render_executor = ThreadPoolExecutor(max_workers=1)  # Full RAW renders (low priority)
         self.loading: set = set()
         self.thumb_loading: set = set()
         self.thumb_failed: set = set()  # Track failed thumbnails for progress
@@ -566,19 +568,65 @@ class ImageViewer(QMainWindow):
   Esc          Close folder
   ⌘Q          Quit
 """
-        self.help_label = QLabel(help_text.strip(), self)
-        self.help_label.setStyleSheet("""
+        self.help_label = QWidget(self)
+        self.help_label.setStyleSheet("background-color: rgba(0, 0, 0, 200);")
+        help_layout = QVBoxLayout(self.help_label)
+        help_layout.setContentsMargins(20, 15, 20, 20)
+        help_layout.setSpacing(8)
+        # Title row with close button
+        title_row = QHBoxLayout()
+        title_label = QLabel("Keyboard Shortcuts")
+        title_label.setStyleSheet("""
             QLabel {
-                background-color: rgba(0, 0, 0, 200);
-                color: #ddd;
-                padding: 20px 30px;
+                background: transparent; color: #ddd;
                 font-family: Menlo, Monaco, monospace;
-                font-size: 13px;
-                line-height: 1.6;
+                font-size: 13px; font-weight: bold;
             }
         """)
+        close_btn = QPushButton("✕")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #999; border: none;
+                font-size: 16px; padding: 0px;
+            }
+            QPushButton:hover { color: white; }
+        """)
+        close_btn.setFixedSize(24, 24)
+        close_btn.clicked.connect(self._toggle_help)
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+        title_row.addWidget(close_btn)
+        help_layout.addLayout(title_row)
+        # Help text (without the title line)
+        shortcuts_text = "\n".join(help_text.strip().split("\n")[1:]).strip()
+        help_content = QLabel(shortcuts_text)
+        help_content.setStyleSheet("""
+            QLabel {
+                background: transparent; color: #ddd;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 13px; line-height: 1.6;
+            }
+        """)
+        help_layout.addWidget(help_content)
         self.help_label.adjustSize()
         self.help_label.setVisible(False)
+
+        # Snackbar
+        self.snackbar = QLabel(self)
+        self.snackbar.setStyleSheet("""
+            QLabel {
+                background-color: rgba(50, 50, 50, 220);
+                color: #ddd;
+                padding: 8px 16px;
+                font-family: 'SF Pro Text', 'Helvetica Neue', sans-serif;
+                font-size: 12px;
+                border-radius: 4px;
+            }
+        """)
+        self.snackbar.setVisible(False)
+        self._snackbar_timer = QTimer(self)
+        self._snackbar_timer.setSingleShot(True)
+        self._snackbar_timer.timeout.connect(lambda: self.snackbar.setVisible(False))
 
         # Title label (centered in title bar)
         self.title_label = QLabel("RAW Viewer", self)
@@ -645,6 +693,12 @@ class ImageViewer(QMainWindow):
 
         self.filter_buttons[0].setChecked(True)
         self.filter_buttons_widget.adjustSize()
+
+        # Help button (standalone, bottom-left, always visible)
+        self.help_btn = QPushButton("?", self)
+        self.help_btn.setStyleSheet(button_style)
+        self.help_btn.clicked.connect(self._toggle_help)
+        self.help_btn.adjustSize()
 
         # Centered open button (shown when no files)
         self.open_btn_center = QPushButton("📂 Open Folder", self)
@@ -715,8 +769,7 @@ class ImageViewer(QMainWindow):
 
     def _on_preloaded(self, idx: int, pixmap: QPixmap):
         with self.lock:
-            if idx not in self.cache:
-                self.cache[idx] = pixmap
+            self.cache[idx] = pixmap
             self.loading.discard(idx)
         if idx == self.index and pixmap:
             self._display(pixmap)
@@ -749,6 +802,12 @@ class ImageViewer(QMainWindow):
 
     def _preload_one(self, idx: int):
         pixmap = self._load_sync(idx)
+        if pixmap:
+            self.preload_signals.loaded.emit(idx, pixmap)
+
+    def _render_full(self, idx: int):
+        """Background full render for files with small embedded previews."""
+        pixmap = render_full_preview(self.files[idx])
         if pixmap:
             self.preload_signals.loaded.emit(idx, pixmap)
 
@@ -792,7 +851,7 @@ class ImageViewer(QMainWindow):
                     self.thumb_failed.add(idx)
 
     def _preload_nearby(self):
-        for offset in [1, -1, 2, -2, 3, -3]:
+        for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]:
             idx = self.index + offset
             with self.lock:
                 if 0 <= idx < len(self.files) and idx not in self.cache and idx not in self.loading:
@@ -883,15 +942,16 @@ class ImageViewer(QMainWindow):
         if pixmap:
             self._display(pixmap)
         else:
-            pixmap = self._load_sync(self.index)
-            if pixmap:
-                with self.lock:
-                    self.cache[self.index] = pixmap
-                self._display(pixmap)
-                # Generate thumbnail too
-                if self.index not in self.filmstrip.thumbnails:
-                    thumb = pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
-                    self.filmstrip.set_thumbnail(self.index, thumb)
+            # Show filmstrip thumbnail as placeholder if available
+            thumb_pixmap = self.filmstrip.thumbnails.get(self.index)
+            if thumb_pixmap:
+                self._display(thumb_pixmap)
+            # Load preview on dedicated executor (skips preload queue)
+            idx = self.index
+            with self.lock:
+                if idx not in self.loading:
+                    self.loading.add(idx)
+                    self.current_executor.submit(self._preload_one, idx)
 
         # Load rating (use original index)
         orig_idx = self.all_files.index(self.files[self.index])
@@ -913,11 +973,11 @@ class ImageViewer(QMainWindow):
     def _update_overlay(self):
         """Update the info overlay labels."""
         if not self.files:
-            self.pos_label.setText("No images")
-            self.pos_label.adjustSize()
-            self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
+            self.pos_label.setText("")
+            self.pos_label.setVisible(False)
             self.info_label.setVisible(False)
             return
+        self.pos_label.setVisible(True)
 
         # Top right: position counter + filter info
         position = f"{self.index + 1}/{len(self.files)}"
@@ -1124,9 +1184,8 @@ class ImageViewer(QMainWindow):
     def _update_empty_state(self):
         """Show/hide UI elements based on whether files are loaded."""
         has_files = len(self.files) > 0
-        # Show filter buttons only when files loaded
-        for btn in self.filter_buttons:
-            btn.setVisible(has_files)
+        # Show entire filter toolbar only when files loaded
+        self.filter_buttons_widget.setVisible(has_files)
         # Show filmstrip only when files loaded and user hasn't hidden it
         self.filmstrip.setVisible(has_files and self.filmstrip_visible)
         # Show centered button and recent folders only when no files
@@ -1174,6 +1233,10 @@ class ImageViewer(QMainWindow):
     def _toggle_view_mode(self):
         """Toggle between RAW and JPEG view modes."""
         if not self._current_folder:
+            return
+        # Don't switch to JPEG if no JPEGs available
+        if self.view_mode == "raw" and not self.jpeg_files:
+            self._show_snackbar("No JPEG files found in this folder")
             return
 
         # Stop background preload
@@ -1272,6 +1335,25 @@ class ImageViewer(QMainWindow):
         y = (self.height() - self.help_label.height()) // 2
         self.help_label.move(x, y)
 
+    def _toggle_help(self):
+        """Toggle help overlay visibility."""
+        self.help_label.setVisible(not self.help_label.isVisible())
+        if self.help_label.isVisible():
+            self.help_label.raise_()
+        self._center_help_label()
+
+    def _show_snackbar(self, text: str, duration: int = 2000):
+        """Show a temporary snackbar message at the bottom center."""
+        self.snackbar.setText(text)
+        self.snackbar.adjustSize()
+        filmstrip_height = self.filmstrip.height() if self.filmstrip.isVisible() else 0
+        x = (self.width() - self.snackbar.width()) // 2
+        y = self.height() - filmstrip_height - self.snackbar.height() - 20
+        self.snackbar.move(x, y)
+        self.snackbar.setVisible(True)
+        self.snackbar.raise_()
+        self._snackbar_timer.start(duration)
+
     def _update_recent_folders_ui(self):
         """Update recent folders buttons."""
         # Clear existing buttons
@@ -1326,6 +1408,8 @@ class ImageViewer(QMainWindow):
         btn_y = self.height() - filmstrip_height - self.filter_buttons_widget.height() - 10
         btn_x = self.width() - self.filter_buttons_widget.width() - 10
         self.filter_buttons_widget.move(btn_x, btn_y)
+        # Position help button bottom-left, above filmstrip
+        self.help_btn.move(10, btn_y)
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
@@ -1457,8 +1541,7 @@ class ImageViewer(QMainWindow):
         elif key == Qt.Key.Key_J:
             self._toggle_view_mode()
         elif key == Qt.Key.Key_H:
-            self.help_label.setVisible(not self.help_label.isVisible())
-            self._center_help_label()
+            self._toggle_help()
         else:
             super().keyPressEvent(event)
 
