@@ -643,6 +643,13 @@ class ImageViewer(QMainWindow):
             filter_layout.addWidget(btn)
             self.filter_buttons.append(btn)
 
+        # Help button
+        filter_layout.addSpacing(10)
+        self.help_btn = QPushButton("?")
+        self.help_btn.setStyleSheet(button_style)
+        self.help_btn.clicked.connect(self._toggle_help)
+        filter_layout.addWidget(self.help_btn)
+
         self.filter_buttons[0].setChecked(True)
         self.filter_buttons_widget.adjustSize()
 
@@ -913,11 +920,11 @@ class ImageViewer(QMainWindow):
     def _update_overlay(self):
         """Update the info overlay labels."""
         if not self.files:
-            self.pos_label.setText("No images")
-            self.pos_label.adjustSize()
-            self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
+            self.pos_label.setText("")
+            self.pos_label.setVisible(False)
             self.info_label.setVisible(False)
             return
+        self.pos_label.setVisible(True)
 
         # Top right: position counter + filter info
         position = f"{self.index + 1}/{len(self.files)}"
@@ -1272,6 +1279,11 @@ class ImageViewer(QMainWindow):
         y = (self.height() - self.help_label.height()) // 2
         self.help_label.move(x, y)
 
+    def _toggle_help(self):
+        """Toggle help overlay visibility."""
+        self.help_label.setVisible(not self.help_label.isVisible())
+        self._center_help_label()
+
     def _update_recent_folders_ui(self):
         """Update recent folders buttons."""
         # Clear existing buttons
@@ -1457,8 +1469,7 @@ class ImageViewer(QMainWindow):
         elif key == Qt.Key.Key_J:
             self._toggle_view_mode()
         elif key == Qt.Key.Key_H:
-            self.help_label.setVisible(not self.help_label.isVisible())
-            self._center_help_label()
+            self._toggle_help()
         else:
             super().keyPressEvent(event)
 
