@@ -34,8 +34,55 @@ jobs:
       - name: Build app
         run: pyinstaller "RAW Viewer.spec" --noconfirm
 
+      - name: Import certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
+
+      - name: Sign app
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # Sign all binaries and dylibs inside the app bundle
+          find "dist/RAW Viewer.app" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) -exec \
+            codesign --force --options runtime --entitlements entitlements.plist \
+            --sign "Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)" {} \;
+          # Sign the app bundle itself
+          codesign --force --options runtime --entitlements entitlements.plist \
+            --sign "Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)" \
+            "dist/RAW Viewer.app"
+
       - name: Zip app bundle
         run: |
+          cd dist
+          zip -r "RAW-Viewer.zip" "RAW Viewer.app"
+
+      - name: Notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit "dist/RAW-Viewer.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+
+      - name: Staple app
+        run: xcrun stapler staple "dist/RAW Viewer.app"
+
+      - name: Re-zip after stapling
+        run: |
+          rm dist/RAW-Viewer.zip
           cd dist
           zip -r "RAW-Viewer.zip" "RAW Viewer.app"
 
