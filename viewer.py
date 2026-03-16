@@ -1281,6 +1281,8 @@ class ImageViewer(QMainWindow):
     def _toggle_help(self):
         """Toggle help overlay visibility."""
         self.help_label.setVisible(not self.help_label.isVisible())
+        if self.help_label.isVisible():
+            self.help_label.raise_()
         self._center_help_label()
 
     def _update_recent_folders_ui(self):
