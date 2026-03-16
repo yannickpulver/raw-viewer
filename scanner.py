@@ -43,12 +43,20 @@ RAW_EXTENSIONS = {
     '.rwz', '.sr2', '.srf', '.x3f'
 }
 
+JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
+
 
 def is_raw_file(path: Path) -> bool:
     # Skip macOS metadata files (._*)
     if path.name.startswith('._'):
         return False
     return path.suffix.lower() in RAW_EXTENSIONS
+
+
+def is_jpeg_file(path: Path) -> bool:
+    if path.name.startswith('._'):
+        return False
+    return path.suffix.lower() in JPEG_EXTENSIONS
 
 
 def get_creation_time(path: Path, use_cache: bool = True) -> float:
@@ -86,39 +94,42 @@ def get_creation_time(path: Path, use_cache: bool = True) -> float:
     return timestamp
 
 
-def scan_folder(folder: str | Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Path]:
-    """Recursively scan folder for RAW files, sorted by creation date.
-
-    Args:
-        folder: Path to scan
-        progress_callback: Optional callback(current, total) for progress updates
-    """
+def _scan_and_sort(
+    folder: str | Path,
+    file_predicate: Callable[[Path], bool],
+    progress_callback: Optional[Callable[[int, int], None]] = None
+) -> List[Path]:
+    """Recursively scan folder for files matching predicate, sorted by creation date."""
     folder = Path(folder)
     if not folder.is_dir():
         raise ValueError(f"Not a directory: {folder}")
 
-    # Phase 1: Find all RAW files (fast)
-    raw_files = []
+    matched = []
     for root, _, files in os.walk(folder):
         for f in files:
             path = Path(root) / f
-            if is_raw_file(path):
-                raw_files.append(path)
+            if file_predicate(path):
+                matched.append(path)
 
-    if not raw_files:
-        return raw_files
+    if not matched:
+        return matched
 
-    # Phase 2: Read EXIF dates with progress (slow if not cached)
-    total = len(raw_files)
+    total = len(matched)
     dates = []
-    for i, path in enumerate(raw_files):
+    for i, path in enumerate(matched):
         dates.append(get_creation_time(path))
         if progress_callback and (i % 5 == 0 or i == total - 1):
             progress_callback(i + 1, total)
 
-    # Save cache
     _save_date_cache()
+    return [f for _, f in sorted(zip(dates, matched))]
 
-    # Sort by creation time (oldest first)
-    sorted_files = [f for _, f in sorted(zip(dates, raw_files))]
-    return sorted_files
+
+def scan_folder(folder: str | Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Path]:
+    """Recursively scan folder for RAW files, sorted by creation date."""
+    return _scan_and_sort(folder, is_raw_file, progress_callback)
+
+
+def scan_folder_jpeg(folder: str | Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Path]:
+    """Recursively scan folder for JPEG files, sorted by creation date."""
+    return _scan_and_sort(folder, is_jpeg_file, progress_callback)

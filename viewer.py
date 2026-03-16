@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayo
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 
-from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes
-from rating import read_rating, write_rating
-from scanner import scan_folder, get_creation_time
+from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes
+from rating import read_rating, write_rating, set_green_tag
+from scanner import scan_folder, scan_folder_jpeg, get_creation_time
 from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
@@ -422,6 +422,23 @@ class ImageViewer(QMainWindow):
         self.filmstrip_visible = True
         self.min_rating_filter = 0  # 0 = show all
 
+        # View mode: "raw" or "jpeg"
+        self.view_mode: str = "raw"
+        self.jpeg_files: List[Path] = []
+        self.jpeg_all_files: List[Path] = []
+        self.jpeg_index: int = 0
+        self.jpeg_cache: Dict[int, QPixmap] = {}
+        self.jpeg_ratings: Dict[int, int] = {}
+        self.jpeg_min_rating_filter: int = 0
+        self._current_folder: Optional[Path] = None
+        # Saved RAW state (for mode switching)
+        self.raw_files_saved: List[Path] = []
+        self.raw_all_files_saved: List[Path] = []
+        self.raw_index_saved: int = 0
+        self.raw_cache_saved: Dict[int, QPixmap] = {}
+        self.raw_ratings_saved: Dict[int, int] = {}
+        self.raw_min_rating_filter_saved: int = 0
+
         # Preloading - separate executors for previews and thumbnails
         self.preload_signals = PreloadSignals()
         self.preload_signals.loaded.connect(self._on_preloaded)
@@ -433,6 +450,7 @@ class ImageViewer(QMainWindow):
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.loading: set = set()
         self.thumb_loading: set = set()
+        self.thumb_failed: set = set()  # Track failed thumbnails for progress
         self.lock = threading.Lock()
 
         # Persistent thumbnail cache
@@ -538,6 +556,7 @@ class ImageViewer(QMainWindow):
   E            Go to end
   R            Go to last rated
 
+  J            Toggle RAW/JPEG mode
   I            Toggle info overlay
   ⌘S          Toggle filmstrip
   H            Toggle this help
@@ -715,11 +734,16 @@ class ImageViewer(QMainWindow):
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
+            if self.view_mode == "jpeg":
+                return load_jpeg_preview(self.files[idx])
             return extract_preview(self.files[idx])
         return None
 
     def _load_thumb_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
+            if self.view_mode == "jpeg":
+                from preview import load_jpeg_thumbnail
+                return load_jpeg_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
             return extract_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
         return None
 
@@ -729,6 +753,7 @@ class ImageViewer(QMainWindow):
             self.preload_signals.loaded.emit(idx, pixmap)
 
     def _preload_thumb(self, idx: int):
+        success = False
         try:
             # Load rating too
             orig_idx = self.all_files.index(self.files[idx])
@@ -738,7 +763,6 @@ class ImageViewer(QMainWindow):
 
             path = self.files[idx]
             size = 80
-
             # Check disk cache first
             cached_bytes = self.thumb_cache.get(path, size)
             if cached_bytes:
@@ -746,22 +770,26 @@ class ImageViewer(QMainWindow):
                 pixmap.loadFromData(cached_bytes)
                 if not pixmap.isNull():
                     self.preload_signals.thumb_loaded.emit(idx, pixmap)
-                    return
+                    success = True
 
             # Generate and cache
-            thumb_bytes = extract_thumbnail_bytes(path, size)
-            if thumb_bytes:
-                self.thumb_cache.set(path, size, thumb_bytes)
-                pixmap = QPixmap()
-                pixmap.loadFromData(thumb_bytes)
-                if not pixmap.isNull():
-                    self.preload_signals.thumb_loaded.emit(idx, pixmap)
+            if not success:
+                thumb_bytes = load_jpeg_thumbnail_bytes(path, size) if self.view_mode == "jpeg" else extract_thumbnail_bytes(path, size)
+                if thumb_bytes:
+                    self.thumb_cache.set(path, size, thumb_bytes)
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(thumb_bytes)
+                    if not pixmap.isNull():
+                        self.preload_signals.thumb_loaded.emit(idx, pixmap)
+                        success = True
         except Exception:
-            pass  # Failed to load this thumbnail
+            pass
         finally:
             # Always remove from loading set to prevent stuck entries
             with self.lock:
                 self.thumb_loading.discard(idx)
+                if not success:
+                    self.thumb_failed.add(idx)
 
     def _preload_nearby(self):
         for offset in [1, -1, 2, -2, 3, -3]:
@@ -933,7 +961,7 @@ class ImageViewer(QMainWindow):
             self.loading_label.setVisible(False)
             return
 
-        loaded = len(self.filmstrip.thumbnails)
+        loaded = len(self.filmstrip.thumbnails) + len(self.thumb_failed)
         total = len(self.files)
         percent = int(loaded / total * 100) if total > 0 else 0
 
@@ -977,6 +1005,7 @@ class ImageViewer(QMainWindow):
         self.filmstrip.set_total(len(self.files))
         self.filmstrip.thumbnails.clear()
         self.thumb_loading.clear()
+        self.thumb_failed.clear()
 
         # Preserve selection if still in filtered list, otherwise reset to 0
         if self.files:
@@ -1010,7 +1039,7 @@ class ImageViewer(QMainWindow):
 
         folder_str = QFileDialog.getExistingDirectory(
             self,
-            "Select folder with RAW files",
+            "Select folder with images",
             start_dir
         )
         if not folder_str:
@@ -1020,6 +1049,7 @@ class ImageViewer(QMainWindow):
 
     def _load_folder(self, folder: Path):
         """Load files from folder (async scan)."""
+        self._current_folder = folder
         # Show scanning indicator
         self.open_btn_center.setVisible(False)
         self.recent_container.setVisible(False)
@@ -1034,6 +1064,13 @@ class ImageViewer(QMainWindow):
 
         def scan():
             files = scan_folder(folder, progress_callback=progress)
+            jpeg_files = scan_folder_jpeg(folder)
+            self.jpeg_files = jpeg_files
+            self.jpeg_all_files = jpeg_files
+            self.jpeg_index = 0
+            self.jpeg_cache.clear()
+            self.jpeg_ratings.clear()
+            self.jpeg_min_rating_filter = 0
             self.preload_signals.folder_scanned.emit(files, folder)
 
         threading.Thread(target=scan, daemon=True).start()
@@ -1066,6 +1103,7 @@ class ImageViewer(QMainWindow):
         self.ratings.clear()
         self.loading.clear()
         self.thumb_loading.clear()
+        self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
 
         # Load new files
@@ -1100,7 +1138,7 @@ class ImageViewer(QMainWindow):
 
     def _close_folder(self):
         """Close current folder and show open folder UI."""
-        if not self.files:
+        if not self.files and not self.jpeg_files:
             return
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
@@ -1110,16 +1148,92 @@ class ImageViewer(QMainWindow):
         self.ratings.clear()
         self.loading.clear()
         self.thumb_loading.clear()
+        self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
         self.files = []
         self.all_files = []
         self.index = 0
         self.min_rating_filter = 0
+        # Clear JPEG state
+        self.jpeg_files = []
+        self.jpeg_all_files = []
+        self.jpeg_index = 0
+        self.jpeg_cache.clear()
+        self.jpeg_ratings.clear()
+        self.jpeg_min_rating_filter = 0
+        self._current_folder = None
+        self.view_mode = "raw"
+        self.title_label.setText("RAW Viewer")
+        self.title_label.adjustSize()
         # Clear image view
         self.image_view.set_pixmap(QPixmap())
         self._update_overlay()
         self._update_filter_buttons()
         self._update_empty_state()
+
+    def _toggle_view_mode(self):
+        """Toggle between RAW and JPEG view modes."""
+        if not self._current_folder:
+            return
+
+        # Stop background preload
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
+
+        # Save current mode state
+        if self.view_mode == "raw":
+            self.raw_files_saved = self.files
+            self.raw_all_files_saved = self.all_files
+            self.raw_index_saved = self.index
+            self.raw_cache_saved = self.cache
+            self.raw_ratings_saved = self.ratings
+            self.raw_min_rating_filter_saved = self.min_rating_filter
+            # Switch to JPEG
+            self.view_mode = "jpeg"
+            self.files = self.jpeg_files
+            self.all_files = self.jpeg_all_files
+            self.index = self.jpeg_index
+            self.cache = self.jpeg_cache
+            self.ratings = self.jpeg_ratings
+            self.min_rating_filter = self.jpeg_min_rating_filter
+        else:
+            self.jpeg_files = self.files
+            self.jpeg_all_files = self.all_files
+            self.jpeg_index = self.index
+            self.jpeg_cache = self.cache
+            self.jpeg_ratings = self.ratings
+            self.jpeg_min_rating_filter = self.min_rating_filter
+            # Switch to RAW
+            self.view_mode = "raw"
+            self.files = self.raw_files_saved
+            self.all_files = self.raw_all_files_saved
+            self.index = self.raw_index_saved
+            self.cache = self.raw_cache_saved
+            self.ratings = self.raw_ratings_saved
+            self.min_rating_filter = self.raw_min_rating_filter_saved
+
+        # Clear transient state
+        self.loading.clear()
+        self.thumb_loading.clear()
+        self.thumb_failed.clear()
+        self.filmstrip.thumbnails.clear()
+
+        # Update title
+        mode_label = "RAW Viewer" if self.view_mode == "raw" else "JPEG Viewer"
+        self.title_label.setText(mode_label)
+        self.title_label.adjustSize()
+
+        # Update UI
+        self.filmstrip.set_total(len(self.files))
+        self._update_filter_buttons()
+        self._update_empty_state()
+        if self.files:
+            self._load_current()
+            self._preload_nearby()
+            self._preload_all_thumbnails()
+        else:
+            self.image_view.set_pixmap(QPixmap())
+        self._update_overlay()
 
     def _toggle_filmstrip(self):
         """Toggle filmstrip visibility."""
@@ -1340,6 +1454,8 @@ class ImageViewer(QMainWindow):
         elif key in (Qt.Key.Key_Q, Qt.Key.Key_W) and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
                                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self.close()
+        elif key == Qt.Key.Key_J:
+            self._toggle_view_mode()
         elif key == Qt.Key.Key_H:
             self.help_label.setVisible(not self.help_label.isVisible())
             self._center_help_label()
@@ -1370,7 +1486,10 @@ class ImageViewer(QMainWindow):
 
         orig_idx = self.all_files.index(self.files[self.index])
         self.ratings[orig_idx] = rating
-        write_rating(self.files[self.index], rating)
+        current_file = self.files[self.index]
+        write_rating(current_file, rating)
+        if self.view_mode == "jpeg":
+            set_green_tag(current_file, rating > 0)
         self.filmstrip.set_rating(self.index, rating)
         self._update_overlay()
 
