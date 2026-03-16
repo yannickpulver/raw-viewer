@@ -2,10 +2,15 @@
 
 from pathlib import Path
 from typing import Optional, Tuple
+import io
 import rawpy
 import exifread
+from PIL import Image as PILImage
+from PIL import ImageCms
 from PyQt6.QtGui import QImage, QPixmap, QTransform, QImageReader
 from PyQt6.QtCore import QByteArray, QBuffer, QIODevice, Qt, QSize
+
+_srgb_profile = ImageCms.createProfile("sRGB")
 
 
 def get_orientation_transform(orientation: int) -> QTransform:
@@ -56,7 +61,8 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
             try:
                 thumb = raw.extract_thumb()
                 if thumb.format == rawpy.ThumbFormat.JPEG:
-                    data = QByteArray(thumb.data)
+                    converted = _convert_icc_to_srgb(thumb.data)
+                    data = QByteArray(converted)
                     image = QImage()
                     image.loadFromData(data, "JPEG")
                     pixmap = QPixmap.fromImage(image)
@@ -78,7 +84,8 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
                     half_size=True,
                     use_camera_wb=True,
                     no_auto_bright=True,
-                    output_bps=8
+                    output_bps=8,
+                    output_color=rawpy.ColorSpace.sRGB,
                 )
                 h, w = rgb.shape[:2]
                 image = QImage(
@@ -116,7 +123,8 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
             try:
                 thumb = raw.extract_thumb()
                 if thumb.format == rawpy.ThumbFormat.JPEG:
-                    data = QByteArray(thumb.data)
+                    converted = _convert_icc_to_srgb(thumb.data)
+                    data = QByteArray(converted)
                     image = QImage()
                     image.loadFromData(data, "JPEG")
                     pixmap = QPixmap.fromImage(image)
@@ -135,7 +143,8 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
                     half_size=True,
                     use_camera_wb=True,
                     no_auto_bright=True,
-                    output_bps=8
+                    output_bps=8,
+                    output_color=rawpy.ColorSpace.sRGB,
                 )
                 h, w = rgb.shape[:2]
                 image = QImage(
@@ -180,6 +189,49 @@ def extract_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> O
     return bytes(byte_array.data())
 
 
+def _convert_icc_to_srgb(image_bytes: bytes) -> bytes:
+    """Convert JPEG with embedded ICC profile to sRGB. Returns original bytes if no profile or already sRGB."""
+    try:
+        pil_img = PILImage.open(io.BytesIO(image_bytes))
+        icc_data = pil_img.info.get("icc_profile")
+        if not icc_data:
+            return image_bytes
+        src_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_data))
+        # Check if already sRGB (avoid unnecessary conversion)
+        desc = ImageCms.getProfileDescription(src_profile).strip()
+        if "srgb" in desc.lower():
+            return image_bytes
+        pil_img = ImageCms.profileToProfile(pil_img, src_profile, _srgb_profile, outputMode="RGB")
+        out = io.BytesIO()
+        pil_img.save(out, format="JPEG", quality=95)
+        return out.getvalue()
+    except Exception:
+        return image_bytes
+
+
+def _load_jpeg_with_icc(path: Path) -> Optional[PILImage.Image]:
+    """Load JPEG via Pillow, converting embedded ICC profile to sRGB."""
+    try:
+        pil_img = PILImage.open(path)
+        icc_data = pil_img.info.get("icc_profile")
+        if icc_data:
+            src_profile = ImageCms.ImageCmsProfile(io.BytesIO(icc_data))
+            desc = ImageCms.getProfileDescription(src_profile).strip()
+            if "srgb" not in desc.lower():
+                pil_img = ImageCms.profileToProfile(pil_img, src_profile, _srgb_profile, outputMode="RGB")
+        return pil_img
+    except Exception:
+        return None
+
+
+def _pil_to_qpixmap(pil_img: PILImage.Image) -> QPixmap:
+    """Convert PIL Image to QPixmap."""
+    pil_img = pil_img.convert("RGB")
+    data = pil_img.tobytes()
+    image = QImage(data, pil_img.width, pil_img.height, 3 * pil_img.width, QImage.Format.Format_RGB888)
+    return QPixmap.fromImage(image.copy())
+
+
 def _get_jpeg_orientation(path: Path) -> int:
     """Read EXIF orientation from JPEG file."""
     try:
@@ -193,44 +245,35 @@ def _get_jpeg_orientation(path: Path) -> int:
 
 
 def load_jpeg_preview(path: Path, max_size: int = 2560) -> Optional[QPixmap]:
-    """Load JPEG file as QPixmap, downscaled for display performance."""
+    """Load JPEG file as QPixmap with ICC→sRGB conversion, downscaled for display."""
     try:
-        reader = QImageReader(str(path))
-        reader.setAutoTransform(True)
-        orig_size = reader.size()
-        if orig_size.isValid():
-            # Downsample large images on decode
-            scale = min(max_size / max(orig_size.width(), orig_size.height(), 1), 1.0)
-            if scale < 1.0:
-                reader.setScaledSize(QSize(
-                    int(orig_size.width() * scale),
-                    int(orig_size.height() * scale)
-                ))
-        image = reader.read()
-        if image.isNull():
+        pil_img = _load_jpeg_with_icc(path)
+        if pil_img is None:
             return None
-        return QPixmap.fromImage(image)
+        # Apply EXIF orientation
+        from PIL import ImageOps
+        pil_img = ImageOps.exif_transpose(pil_img)
+        # Downscale if needed
+        w, h = pil_img.size
+        scale = min(max_size / max(w, h, 1), 1.0)
+        if scale < 1.0:
+            pil_img = pil_img.resize((int(w * scale), int(h * scale)), PILImage.Resampling.LANCZOS)
+        return _pil_to_qpixmap(pil_img)
     except Exception as e:
         print(f"Error loading JPEG {path}: {e}")
         return None
 
 
 def load_jpeg_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
-    """Load JPEG thumbnail for filmstrip, downscaled on decode."""
+    """Load JPEG thumbnail with ICC→sRGB conversion, downscaled on decode."""
     try:
-        reader = QImageReader(str(path))
-        reader.setAutoTransform(True)
-        orig_size = reader.size()
-        if orig_size.isValid():
-            # Scale down to thumbnail size during decode
-            reader.setScaledSize(orig_size.scaled(
-                QSize(size, size),
-                Qt.AspectRatioMode.KeepAspectRatio
-            ))
-        image = reader.read()
-        if image.isNull():
+        pil_img = _load_jpeg_with_icc(path)
+        if pil_img is None:
             return None
-        return QPixmap.fromImage(image)
+        from PIL import ImageOps
+        pil_img = ImageOps.exif_transpose(pil_img)
+        pil_img.thumbnail((size, size), PILImage.Resampling.LANCZOS)
+        return _pil_to_qpixmap(pil_img)
     except Exception as e:
         print(f"Error loading JPEG thumbnail {path}: {e}")
         return None
