@@ -53,14 +53,42 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          # Sign all binaries and dylibs inside the app bundle
-          find "dist/RAW Viewer.app" -type f \( -name "*.dylib" -o -name "*.so" -o -perm +111 \) -exec \
-            codesign --force --options runtime --entitlements entitlements.plist \
-            --sign "Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)" {} \;
-          # Sign the app bundle itself
-          codesign --force --options runtime --entitlements entitlements.plist \
-            --sign "Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)" \
-            "dist/RAW Viewer.app"
+          APP="dist/RAW Viewer.app"
+          IDENTITY="Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)"
+          SIGN="codesign --force --options runtime --entitlements entitlements.plist --sign"
+
+          # 1. Sign .framework bundles (inner binaries first, then the framework bundle)
+          find "$APP" -name "*.framework" -type d | sort -r | while read fw; do
+            # Sign all Mach-O files inside the framework
+            find "$fw" -type f -perm +111 | while read bin; do
+              $SIGN "$IDENTITY" "$bin"
+            done
+            # Sign the framework bundle itself
+            $SIGN "$IDENTITY" "$fw"
+          done
+
+          # 2. Sign remaining .dylib and .so files
+          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) | while read lib; do
+            $SIGN "$IDENTITY" "$lib"
+          done
+
+          # 3. Sign standalone executables (not inside frameworks, not the main app)
+          find "$APP/Contents/MacOS" -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+          find "$APP/Contents/Resources" -maxdepth 1 -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+          find "$APP/Contents/Frameworks" -maxdepth 1 -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+
+          # 4. Sign the app bundle last
+          $SIGN "$IDENTITY" "$APP"
+
+          # Verify
+          codesign --verify --deep --strict "$APP"
+          echo "Signing verified successfully"
 
       - name: Zip app bundle
         run: |
