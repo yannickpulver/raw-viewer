@@ -46,5 +46,5 @@ app = BUNDLE(
     coll,
     name='RAW Viewer.app',
     icon='icon.icns',
-    bundle_identifier=None,
+    bundle_identifier='dev.yannickpulver.rawviewer',
 )

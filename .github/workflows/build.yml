@@ -3,6 +3,8 @@ name: Build and Release
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   build:
@@ -34,12 +36,102 @@ jobs:
       - name: Build app
         run: pyinstaller "RAW Viewer.spec" --noconfirm
 
+      - name: Import certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+          rm certificate.p12
+
+      - name: Sign app
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          APP="dist/RAW Viewer.app"
+          IDENTITY="Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)"
+          SIGN="codesign --force --options runtime --entitlements entitlements.plist --sign"
+
+          # 1. Sign .framework bundles (inner binaries first, then the framework bundle)
+          find "$APP" -name "*.framework" -type d | sort -r | while read fw; do
+            # Sign all Mach-O files inside the framework
+            find "$fw" -type f -perm +111 | while read bin; do
+              $SIGN "$IDENTITY" "$bin"
+            done
+            # Sign the framework bundle itself
+            $SIGN "$IDENTITY" "$fw"
+          done
+
+          # 2. Sign remaining .dylib and .so files
+          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) | while read lib; do
+            $SIGN "$IDENTITY" "$lib"
+          done
+
+          # 3. Sign standalone executables (not inside frameworks, not the main app)
+          find "$APP/Contents/MacOS" -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+          find "$APP/Contents/Resources" -maxdepth 1 -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+          find "$APP/Contents/Frameworks" -maxdepth 1 -type f -perm +111 | while read bin; do
+            $SIGN "$IDENTITY" "$bin"
+          done
+
+          # 4. Sign the app bundle last
+          $SIGN "$IDENTITY" "$APP"
+
+          # Verify
+          codesign --verify --deep --strict "$APP"
+          echo "Signing verified successfully"
+
       - name: Zip app bundle
         run: |
+          ditto -c -k --keepParent "dist/RAW Viewer.app" "dist/RAW-Viewer.zip"
+
+      - name: Notarize app
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          OUTPUT=$(xcrun notarytool submit "dist/RAW-Viewer.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait 2>&1)
+          echo "$OUTPUT"
+          # Extract submission ID and fetch log on failure
+          SUBMISSION_ID=$(echo "$OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+          if echo "$OUTPUT" | grep -q "status: Invalid"; then
+            echo "Notarization failed! Fetching log..."
+            xcrun notarytool log "$SUBMISSION_ID" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD"
+            exit 1
+          fi
+          if ! echo "$OUTPUT" | grep -q "status: Accepted"; then
+            echo "Notarization did not succeed. Status unknown."
+            exit 1
+          fi
+
+      - name: Staple app
+        run: xcrun stapler staple "dist/RAW Viewer.app"
+
+      - name: Re-zip after stapling
+        run: |
+          rm dist/RAW-Viewer.zip
           cd dist
           zip -r "RAW-Viewer.zip" "RAW Viewer.app"
 
       - name: Create Release
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
