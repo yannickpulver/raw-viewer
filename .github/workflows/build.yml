@@ -25,13 +25,9 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Generate version
+      - name: Read version
         id: version
-        run: echo "version=$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
-      - name: Write version file
-        run: |
-          echo "VERSION = \"v${{ steps.version.outputs.version }}\"" > version.py
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
 
       - name: Build app
         run: pyinstaller "RAW Viewer.spec" --noconfirm
