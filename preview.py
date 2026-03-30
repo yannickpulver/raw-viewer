@@ -247,3 +247,42 @@ def load_jpeg_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) ->
     pixmap.save(buffer, "JPEG", quality)
     buffer.close()
     return bytes(byte_array.data())
+
+
+def load_video_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
+    """Extract video thumbnail using macOS Quick Look."""
+    try:
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subprocess.run(
+                ['qlmanage', '-t', '-s', str(size * 2), '-o', tmpdir, str(path)],
+                capture_output=True, timeout=10
+            )
+            for f in Path(tmpdir).iterdir():
+                if f.suffix == '.png':
+                    pixmap = QPixmap(str(f))
+                    if not pixmap.isNull():
+                        return pixmap.scaled(
+                            size, size,
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation
+                        )
+        return None
+    except Exception as e:
+        print(f"Error loading video thumbnail {path}: {e}")
+        return None
+
+
+def load_video_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> Optional[bytes]:
+    """Extract video thumbnail as JPEG bytes for caching."""
+    pixmap = load_video_thumbnail(path, size)
+    if pixmap is None:
+        return None
+    byte_array = QByteArray()
+    buffer = QBuffer(byte_array)
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    pixmap.save(buffer, "JPEG", quality)
+    buffer.close()
+    return bytes(byte_array.data())
