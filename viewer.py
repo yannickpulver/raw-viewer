@@ -11,13 +11,16 @@ import json
 
 from version import VERSION
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
-from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer, QUrl
+
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview
 from rating import read_rating, write_rating, set_green_tag
-from scanner import scan_folder, scan_folder_jpeg, get_creation_time
+from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
 from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
@@ -422,22 +425,15 @@ class ImageViewer(QMainWindow):
         self.filmstrip_visible = True
         self.min_rating_filter = 0  # 0 = show all
 
-        # View mode: "raw" or "jpeg"
+        # View mode: "raw", "jpeg", or "video"
         self.view_mode: str = "raw"
-        self.jpeg_files: List[Path] = []
-        self.jpeg_all_files: List[Path] = []
-        self.jpeg_index: int = 0
-        self.jpeg_cache: Dict[int, QPixmap] = {}
-        self.jpeg_ratings: Dict[int, int] = {}
-        self.jpeg_min_rating_filter: int = 0
         self._current_folder: Optional[Path] = None
-        # Saved RAW state (for mode switching)
-        self.raw_files_saved: List[Path] = []
-        self.raw_all_files_saved: List[Path] = []
-        self.raw_index_saved: int = 0
-        self.raw_cache_saved: Dict[int, QPixmap] = {}
-        self.raw_ratings_saved: Dict[int, int] = {}
-        self.raw_min_rating_filter_saved: int = 0
+        # Per-mode state storage
+        self._mode_state: Dict[str, dict] = {
+            "raw": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
+            "jpeg": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
+            "video": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
+        }
 
         # Preloading - separate executors for previews and thumbnails
         self.preload_signals = PreloadSignals()
@@ -469,9 +465,54 @@ class ImageViewer(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Image display
+        # Content stack (image or video)
+        self.content_stack = QStackedWidget()
+
         self.image_view = ZoomableImageView()
-        layout.addWidget(self.image_view, 1)
+        self.content_stack.addWidget(self.image_view)
+
+        # Video container with player and timeline
+        self.video_container = QWidget()
+        self.video_container.setStyleSheet("background-color: black;")
+        vc_layout = QVBoxLayout(self.video_container)
+        vc_layout.setContentsMargins(0, 0, 0, 0)
+        vc_layout.setSpacing(0)
+
+        self.video_widget = QVideoWidget()
+        self.video_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        vc_layout.addWidget(self.video_widget, 1)
+
+        # Timeline
+        timeline_row = QWidget()
+        timeline_row.setStyleSheet("background-color: rgba(20, 20, 20, 220);")
+        tl_layout = QHBoxLayout(timeline_row)
+        tl_layout.setContentsMargins(10, 4, 10, 4)
+        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider.setStyleSheet("""
+            QSlider::groove:horizontal { height: 4px; background: #333; border-radius: 2px; }
+            QSlider::handle:horizontal { background: #fff; width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; }
+            QSlider::sub-page:horizontal { background: #888; border-radius: 2px; }
+        """)
+        self.time_label = QLabel("0:00 / 0:00")
+        self.time_label.setStyleSheet("color: #aaa; font-family: Menlo, Monaco, monospace; font-size: 11px; padding: 0 8px;")
+        self.time_label.setFixedWidth(100)
+        self.timeline_slider.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        tl_layout.addWidget(self.timeline_slider)
+        tl_layout.addWidget(self.time_label)
+        vc_layout.addWidget(timeline_row)
+
+        self.content_stack.addWidget(self.video_container)
+
+        # Media player
+        self.player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.player.setAudioOutput(self.audio_output)
+        self.player.setVideoOutput(self.video_widget)
+        self.player.positionChanged.connect(self._on_position_changed)
+        self.player.durationChanged.connect(self._on_duration_changed)
+        self.timeline_slider.sliderMoved.connect(self._on_timeline_seek)
+
+        layout.addWidget(self.content_stack, 1)
 
         # Filmstrip
         self.filmstrip = FilmstripWidget()
@@ -559,6 +600,8 @@ class ImageViewer(QMainWindow):
   R            Go to last rated
 
   J            Toggle RAW/JPEG mode
+  M            Toggle Video mode
+  Space        Play/Pause video
   I            Toggle info overlay
   ⌘S          Toggle filmstrip
   H            Toggle this help
@@ -787,6 +830,8 @@ class ImageViewer(QMainWindow):
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
+            if self.view_mode == "video":
+                return None  # Video mode uses player, not cached pixmaps
             if self.view_mode == "jpeg":
                 return load_jpeg_preview(self.files[idx])
             return extract_preview(self.files[idx])
@@ -797,10 +842,15 @@ class ImageViewer(QMainWindow):
             if self.view_mode == "jpeg":
                 from preview import load_jpeg_thumbnail
                 return load_jpeg_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
+            if self.view_mode == "video":
+                from preview import load_video_thumbnail
+                return load_video_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
             return extract_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
         return None
 
     def _preload_one(self, idx: int):
+        if self.view_mode == "video":
+            return
         pixmap = self._load_sync(idx)
         if pixmap:
             self.preload_signals.loaded.emit(idx, pixmap)
@@ -833,7 +883,13 @@ class ImageViewer(QMainWindow):
 
             # Generate and cache
             if not success:
-                thumb_bytes = load_jpeg_thumbnail_bytes(path, size) if self.view_mode == "jpeg" else extract_thumbnail_bytes(path, size)
+                if self.view_mode == "video":
+                    from preview import load_video_thumbnail_bytes
+                    thumb_bytes = load_video_thumbnail_bytes(path, size)
+                elif self.view_mode == "jpeg":
+                    thumb_bytes = load_jpeg_thumbnail_bytes(path, size)
+                else:
+                    thumb_bytes = extract_thumbnail_bytes(path, size)
                 if thumb_bytes:
                     self.thumb_cache.set(path, size, thumb_bytes)
                     pixmap = QPixmap()
@@ -851,6 +907,8 @@ class ImageViewer(QMainWindow):
                     self.thumb_failed.add(idx)
 
     def _preload_nearby(self):
+        if self.view_mode == "video":
+            return
         for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]:
             idx = self.index + offset
             with self.lock:
@@ -936,12 +994,14 @@ class ImageViewer(QMainWindow):
         if not self.files:
             return
 
-        with self.lock:
-            pixmap = self.cache.get(self.index)
-
-        if pixmap:
-            self._display(pixmap)
+        if self.view_mode == "video":
+            # Load video into player
+            self.player.stop()
+            self.player.setSource(QUrl.fromLocalFile(str(self.files[self.index])))
+            self.player.play()
+            self.content_stack.setCurrentIndex(1)
         else:
+            self.content_stack.setCurrentIndex(0)
             # Show filmstrip thumbnail as placeholder if available
             thumb_pixmap = self.filmstrip.thumbnails.get(self.index)
             if thumb_pixmap:
@@ -1125,12 +1185,9 @@ class ImageViewer(QMainWindow):
         def scan():
             files = scan_folder(folder, progress_callback=progress)
             jpeg_files = scan_folder_jpeg(folder)
-            self.jpeg_files = jpeg_files
-            self.jpeg_all_files = jpeg_files
-            self.jpeg_index = 0
-            self.jpeg_cache.clear()
-            self.jpeg_ratings.clear()
-            self.jpeg_min_rating_filter = 0
+            video_files = scan_folder_video(folder)
+            self._mode_state["jpeg"] = {"files": jpeg_files, "all_files": jpeg_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+            self._mode_state["video"] = {"files": video_files, "all_files": video_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
             self.preload_signals.folder_scanned.emit(files, folder)
 
         threading.Thread(target=scan, daemon=True).start()
@@ -1197,11 +1254,14 @@ class ImageViewer(QMainWindow):
 
     def _close_folder(self):
         """Close current folder and show open folder UI."""
-        if not self.files and not self.jpeg_files:
+        has_any = self.files or any(s["files"] for s in self._mode_state.values())
+        if not has_any:
             return
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
+        # Stop video
+        self.player.stop()
         # Clear state
         self.cache.clear()
         self.ratings.clear()
@@ -1213,15 +1273,12 @@ class ImageViewer(QMainWindow):
         self.all_files = []
         self.index = 0
         self.min_rating_filter = 0
-        # Clear JPEG state
-        self.jpeg_files = []
-        self.jpeg_all_files = []
-        self.jpeg_index = 0
-        self.jpeg_cache.clear()
-        self.jpeg_ratings.clear()
-        self.jpeg_min_rating_filter = 0
+        # Clear all mode states
+        for mode in self._mode_state:
+            self._mode_state[mode] = {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
         self._current_folder = None
         self.view_mode = "raw"
+        self.content_stack.setCurrentIndex(0)
         self.title_label.setText("RAW Viewer")
         self.title_label.adjustSize()
         # Clear image view
@@ -1230,8 +1287,29 @@ class ImageViewer(QMainWindow):
         self._update_filter_buttons()
         self._update_empty_state()
 
-    def _toggle_view_mode(self):
-        """Toggle between RAW and JPEG view modes."""
+    def _save_mode_state(self, mode: str):
+        """Save current active state to the given mode's storage."""
+        self._mode_state[mode] = {
+            "files": self.files,
+            "all_files": self.all_files,
+            "index": self.index,
+            "cache": self.cache,
+            "ratings": self.ratings,
+            "min_rating_filter": self.min_rating_filter,
+        }
+
+    def _load_mode_state(self, mode: str):
+        """Load state from given mode's storage into active state."""
+        state = self._mode_state[mode]
+        self.files = state["files"]
+        self.all_files = state["all_files"]
+        self.index = state["index"]
+        self.cache = state["cache"]
+        self.ratings = state["ratings"]
+        self.min_rating_filter = state["min_rating_filter"]
+
+    def _switch_view_mode(self, target_mode: str):
+        """Switch to target mode, or back to raw if already in it."""
         if not self._current_folder:
             return
         # Don't switch to JPEG if no JPEGs available
@@ -1239,41 +1317,22 @@ class ImageViewer(QMainWindow):
             self._show_snackbar("No JPEG files found in this folder")
             return
 
+        # Toggle back to raw if already in target
+        if self.view_mode == target_mode:
+            target_mode = "raw"
+
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
 
-        # Save current mode state
-        if self.view_mode == "raw":
-            self.raw_files_saved = self.files
-            self.raw_all_files_saved = self.all_files
-            self.raw_index_saved = self.index
-            self.raw_cache_saved = self.cache
-            self.raw_ratings_saved = self.ratings
-            self.raw_min_rating_filter_saved = self.min_rating_filter
-            # Switch to JPEG
-            self.view_mode = "jpeg"
-            self.files = self.jpeg_files
-            self.all_files = self.jpeg_all_files
-            self.index = self.jpeg_index
-            self.cache = self.jpeg_cache
-            self.ratings = self.jpeg_ratings
-            self.min_rating_filter = self.jpeg_min_rating_filter
-        else:
-            self.jpeg_files = self.files
-            self.jpeg_all_files = self.all_files
-            self.jpeg_index = self.index
-            self.jpeg_cache = self.cache
-            self.jpeg_ratings = self.ratings
-            self.jpeg_min_rating_filter = self.min_rating_filter
-            # Switch to RAW
-            self.view_mode = "raw"
-            self.files = self.raw_files_saved
-            self.all_files = self.raw_all_files_saved
-            self.index = self.raw_index_saved
-            self.cache = self.raw_cache_saved
-            self.ratings = self.raw_ratings_saved
-            self.min_rating_filter = self.raw_min_rating_filter_saved
+        # Stop video if leaving video mode
+        if self.view_mode == "video":
+            self.player.stop()
+
+        # Save current, load target
+        self._save_mode_state(self.view_mode)
+        self._load_mode_state(target_mode)
+        self.view_mode = target_mode
 
         # Clear transient state
         self.loading.clear()
@@ -1282,9 +1341,12 @@ class ImageViewer(QMainWindow):
         self.filmstrip.thumbnails.clear()
 
         # Update title
-        mode_label = "RAW Viewer" if self.view_mode == "raw" else "JPEG Viewer"
-        self.title_label.setText(mode_label)
+        titles = {"raw": "RAW Viewer", "jpeg": "JPEG Viewer", "video": "Video Viewer"}
+        self.title_label.setText(titles[self.view_mode])
         self.title_label.adjustSize()
+
+        # Switch content view
+        self.content_stack.setCurrentIndex(1 if self.view_mode == "video" else 0)
 
         # Update UI
         self.filmstrip.set_total(len(self.files))
@@ -1295,7 +1357,8 @@ class ImageViewer(QMainWindow):
             self._preload_nearby()
             self._preload_all_thumbnails()
         else:
-            self.image_view.set_pixmap(QPixmap())
+            if self.view_mode != "video":
+                self.image_view.set_pixmap(QPixmap())
         self._update_overlay()
 
     def _toggle_filmstrip(self):
@@ -1539,7 +1602,12 @@ class ImageViewer(QMainWindow):
                                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self.close()
         elif key == Qt.Key.Key_J:
-            self._toggle_view_mode()
+            self._switch_view_mode("jpeg")
+        elif key == Qt.Key.Key_M:
+            self._switch_view_mode("video")
+        elif key == Qt.Key.Key_Space:
+            if self.view_mode == "video":
+                self._toggle_playback()
         elif key == Qt.Key.Key_H:
             self._toggle_help()
         else:
@@ -1571,7 +1639,7 @@ class ImageViewer(QMainWindow):
         self.ratings[orig_idx] = rating
         current_file = self.files[self.index]
         write_rating(current_file, rating)
-        if self.view_mode == "jpeg":
+        if self.view_mode in ("jpeg", "video"):
             set_green_tag(current_file, rating > 0)
         self.filmstrip.set_rating(self.index, rating)
         self._update_overlay()
@@ -1602,10 +1670,39 @@ class ImageViewer(QMainWindow):
         except ImportError:
             pass
 
+    def _toggle_playback(self):
+        """Toggle video play/pause."""
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+        else:
+            self.player.play()
+
+    def _on_position_changed(self, position: int):
+        """Update timeline slider as video plays."""
+        if not self.timeline_slider.isSliderDown():
+            self.timeline_slider.setValue(position)
+        self._update_time_label()
+
+    def _on_duration_changed(self, duration: int):
+        """Update timeline range when video loads."""
+        self.timeline_slider.setRange(0, duration)
+        self._update_time_label()
+
+    def _on_timeline_seek(self, position: int):
+        """Seek video to slider position."""
+        self.player.setPosition(position)
+
+    def _update_time_label(self):
+        """Update the time display label."""
+        pos = self.player.position() // 1000
+        dur = self.player.duration() // 1000
+        self.time_label.setText(f"{pos // 60}:{pos % 60:02d} / {dur // 60}:{dur % 60:02d}")
+
     def closeEvent(self, event):
         # Stop background preload timer
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
+        self.player.stop()
         self.executor.shutdown(wait=False)
         self.thumb_executor.shutdown(wait=False)
         super().closeEvent(event)

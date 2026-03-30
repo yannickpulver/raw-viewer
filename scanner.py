@@ -45,6 +45,8 @@ RAW_EXTENSIONS = {
 
 JPEG_EXTENSIONS = {'.jpg', '.jpeg'}
 
+VIDEO_EXTENSIONS = {'.mov', '.mp4', '.m4v'}
+
 
 def is_raw_file(path: Path) -> bool:
     # Skip macOS metadata files (._*)
@@ -57,6 +59,12 @@ def is_jpeg_file(path: Path) -> bool:
     if path.name.startswith('._'):
         return False
     return path.suffix.lower() in JPEG_EXTENSIONS
+
+
+def is_video_file(path: Path) -> bool:
+    if path.name.startswith('._'):
+        return False
+    return path.suffix.lower() in VIDEO_EXTENSIONS
 
 
 def get_creation_time(path: Path, use_cache: bool = True) -> float:
@@ -133,3 +141,8 @@ def scan_folder(folder: str | Path, progress_callback: Optional[Callable[[int, i
 def scan_folder_jpeg(folder: str | Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Path]:
     """Recursively scan folder for JPEG files, sorted by creation date."""
     return _scan_and_sort(folder, is_jpeg_file, progress_callback)
+
+
+def scan_folder_video(folder: str | Path, progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Path]:
+    """Recursively scan folder for video files, sorted by creation date."""
+    return _scan_and_sort(folder, is_video_file, progress_callback)
