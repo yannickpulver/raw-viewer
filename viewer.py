@@ -20,6 +20,7 @@ from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview
 from rating import read_rating, write_rating, set_green_tag
+from resolve_export import export_to_resolve, is_resolve_installed
 from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
 from datetime import datetime
 from thumbnail_cache import ThumbnailCache
@@ -33,6 +34,8 @@ class PreloadSignals(QObject):
     update_available = pyqtSignal(str, str)  # latest_version, download_url
     folder_scanned = pyqtSignal(list, Path)  # files, folder
     scan_progress = pyqtSignal(int, int)  # current, total
+    resolve_status = pyqtSignal(str)  # status message
+    resolve_done = pyqtSignal(bool, str)  # success, message
 
 
 class ZoomableImageView(QGraphicsView):
@@ -587,6 +590,22 @@ class ImageViewer(QMainWindow):
         self.update_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_url = None
 
+        # Resolve export status label
+        self.resolve_label = QLabel(self)
+        self.resolve_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(40, 40, 40, 220);
+                color: #ddd;
+                padding: 8px 16px;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 12px;
+            }
+        """)
+        self.resolve_label.setVisible(False)
+        self._resolve_exporting = False
+        self.preload_signals.resolve_status.connect(self._on_resolve_status)
+        self.preload_signals.resolve_done.connect(self._on_resolve_done)
+
         # Help overlay
         help_text = """
   Keyboard Shortcuts
@@ -608,6 +627,7 @@ class ImageViewer(QMainWindow):
 
   O            Show in Finder
   ⌘L          Open all in Lightroom
+  ⌘D          Export to DaVinci Resolve
   Esc          Close folder
   ⌘Q          Quit
 """
@@ -1313,7 +1333,7 @@ class ImageViewer(QMainWindow):
         if not self._current_folder:
             return
         # Don't switch to JPEG if no JPEGs available
-        if self.view_mode == "raw" and not self.jpeg_files:
+        if self.view_mode == "raw" and target_mode == "jpeg" and not self._mode_state["jpeg"]["files"]:
             self._show_snackbar("No JPEG files found in this folder")
             return
 
@@ -1404,6 +1424,52 @@ class ImageViewer(QMainWindow):
         if self.help_label.isVisible():
             self.help_label.raise_()
         self._center_help_label()
+
+    def _export_to_resolve(self):
+        """Export current files with ratings to DaVinci Resolve."""
+        if not self.files:
+            self._show_snackbar("No files to export")
+            return
+        if self._resolve_exporting:
+            self._show_snackbar("Export already in progress")
+            return
+
+        self._resolve_exporting = True
+        self._load_all_ratings()
+        folder_name = self._current_folder.name if self._current_folder else "Untitled"
+
+        # Capture state for thread
+        files = list(self.files)
+        ratings = dict(self.ratings)
+        all_files = list(self.all_files)
+        signals = self.preload_signals
+
+        def run():
+            def on_status(msg):
+                signals.resolve_status.emit(msg)
+            success, message = export_to_resolve(files, ratings, all_files, folder_name, on_status)
+            signals.resolve_done.emit(success, message)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_resolve_status(self, message: str):
+        """Update resolve export status label."""
+        if message:
+            self.resolve_label.setText(message)
+            self.resolve_label.adjustSize()
+            x = (self.width() - self.resolve_label.width()) // 2
+            y = (self.height() - self.resolve_label.height()) // 2
+            self.resolve_label.move(x, y)
+            self.resolve_label.setVisible(True)
+            self.resolve_label.raise_()
+        else:
+            self.resolve_label.setVisible(False)
+
+    def _on_resolve_done(self, success: bool, message: str):
+        """Handle resolve export completion."""
+        self._resolve_exporting = False
+        self.resolve_label.setVisible(False)
+        self._show_snackbar(message, 4000 if success else 5000)
 
     def _show_snackbar(self, text: str, duration: int = 2000):
         """Show a temporary snackbar message at the bottom center."""
@@ -1571,6 +1637,9 @@ class ImageViewer(QMainWindow):
             if self.files:
                 # Open all files in Lightroom
                 subprocess.run(['open', '-a', 'Adobe Lightroom Classic'] + [str(f) for f in self.files])
+        elif key == Qt.Key.Key_D and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
+                                       event.modifiers() == Qt.KeyboardModifier.MetaModifier):
+            self._export_to_resolve()
         elif key == Qt.Key.Key_E:
             if self.files:
                 self.index = len(self.files) - 1
