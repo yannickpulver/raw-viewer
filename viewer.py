@@ -99,6 +99,13 @@ class ZoomableImageView(QGraphicsView):
             self.base_zoom = self.transform().m11()
             self.zoom_factor = 1.0
 
+    def toggle_zoom(self):
+        """Toggle between fit-to-view and 2x zoom."""
+        if abs(self.zoom_factor - 1.0) < 0.01:
+            self._apply_zoom(2.0)
+        else:
+            self.reset_zoom()
+
     def _apply_zoom(self, factor: float, center: QPointF = None):
         """Apply zoom factor around a point."""
         new_zoom = self.zoom_factor * factor
@@ -1022,16 +1029,22 @@ class ImageViewer(QMainWindow):
             self.content_stack.setCurrentIndex(1)
         else:
             self.content_stack.setCurrentIndex(0)
-            # Show filmstrip thumbnail as placeholder if available
-            thumb_pixmap = self.filmstrip.thumbnails.get(self.index)
-            if thumb_pixmap:
-                self._display(thumb_pixmap)
-            # Load preview on dedicated executor (skips preload queue)
-            idx = self.index
+            # Use cached full preview if available (instant)
             with self.lock:
-                if idx not in self.loading:
-                    self.loading.add(idx)
-                    self.current_executor.submit(self._preload_one, idx)
+                cached = self.cache.get(self.index)
+            if cached:
+                self._display(cached)
+            else:
+                # Show filmstrip thumbnail as placeholder if available
+                thumb_pixmap = self.filmstrip.thumbnails.get(self.index)
+                if thumb_pixmap:
+                    self._display(thumb_pixmap)
+                # Load preview on dedicated executor (skips preload queue)
+                idx = self.index
+                with self.lock:
+                    if idx not in self.loading:
+                        self.loading.add(idx)
+                        self.current_executor.submit(self._preload_one, idx)
 
         # Load rating (use original index)
         orig_idx = self.all_files.index(self.files[self.index])
@@ -1677,6 +1690,8 @@ class ImageViewer(QMainWindow):
         elif key == Qt.Key.Key_Space:
             if self.view_mode == "video":
                 self._toggle_playback()
+            else:
+                self.image_view.toggle_zoom()
         elif key == Qt.Key.Key_H:
             self._toggle_help()
         else:
