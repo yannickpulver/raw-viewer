@@ -1800,7 +1800,7 @@ class ImageViewer(QMainWindow):
             req = urllib.request.Request(url, headers={"User-Agent": "RAW-Viewer"})
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
-                latest = data.get("tag_name", "")
+                latest = data.get("tag_name", "").lstrip("v")
                 if latest and latest != VERSION:
                     download_url = data.get("html_url", "")
                     self.preload_signals.update_available.emit(latest, download_url)
