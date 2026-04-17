@@ -11,6 +11,8 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -133,3 +135,12 @@ jobs:
           name: RAW Viewer ${{ steps.version.outputs.version }}
           files: dist/RAW-Viewer.zip
           generate_release_notes: true
+
+  update-homebrew:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/update-homebrew-tap.yml
+    with:
+      tag: v${{ needs.build.outputs.version }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
