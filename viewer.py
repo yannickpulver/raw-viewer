@@ -8,6 +8,7 @@ import subprocess
 import platform
 import urllib.request
 import json
+import time
 
 from version import VERSION
 
@@ -25,6 +26,7 @@ from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creati
 from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
+from shoot_stats import load_stats, save_stats
 
 
 class PreloadSignals(QObject):
@@ -469,6 +471,14 @@ class ImageViewer(QMainWindow):
         self._progress_timer.timeout.connect(self._update_loading_progress)
         self._progress_timer.start(200)  # Update every 200ms
 
+        # Shoot selection timer state (persisted per folder)
+        # Total elapsed = _shoot_persisted_elapsed + (time.time() - _shoot_session_start).
+        # _shoot_last_rating_elapsed is total elapsed at the moment of last rating.
+        self._shoot_session_start: Optional[float] = None
+        self._shoot_persisted_elapsed: float = 0.0
+        self._shoot_last_rating_elapsed: Optional[float] = None
+        self._shoot_rated_count: int = 0
+
         # Main layout
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -631,6 +641,7 @@ class ImageViewer(QMainWindow):
   I            Toggle info overlay
   ⌘S          Toggle filmstrip
   H            Toggle this help
+  T            Toggle shoot stats
 
   O            Show in Finder
   ⌘L          Open all in Lightroom
@@ -680,6 +691,51 @@ class ImageViewer(QMainWindow):
         help_layout.addWidget(help_content)
         self.help_label.adjustSize()
         self.help_label.setVisible(False)
+
+        # Shoot stats overlay (stats for nerds)
+        self.stats_label = QWidget(self)
+        self.stats_label.setStyleSheet("background-color: rgba(0, 0, 0, 200);")
+        stats_layout = QVBoxLayout(self.stats_label)
+        stats_layout.setContentsMargins(20, 15, 20, 20)
+        stats_layout.setSpacing(8)
+        stats_title_row = QHBoxLayout()
+        stats_title_label = QLabel("Shoot Stats")
+        stats_title_label.setStyleSheet("""
+            QLabel {
+                background: transparent; color: #ddd;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 13px; font-weight: bold;
+            }
+        """)
+        stats_close_btn = QPushButton("✕")
+        stats_close_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #999; border: none;
+                font-size: 16px; padding: 0px;
+            }
+            QPushButton:hover { color: white; }
+        """)
+        stats_close_btn.setFixedSize(24, 24)
+        stats_close_btn.clicked.connect(self._toggle_stats)
+        stats_title_row.addWidget(stats_title_label)
+        stats_title_row.addStretch()
+        stats_title_row.addWidget(stats_close_btn)
+        stats_layout.addLayout(stats_title_row)
+        self.stats_content = QLabel("No shoot active.")
+        self.stats_content.setStyleSheet("""
+            QLabel {
+                background: transparent; color: #ddd;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 13px; line-height: 1.6;
+            }
+        """)
+        self.stats_content.setMinimumWidth(280)
+        stats_layout.addWidget(self.stats_content)
+        self.stats_label.adjustSize()
+        self.stats_label.setVisible(False)
+        self._stats_refresh_timer = QTimer(self)
+        self._stats_refresh_timer.timeout.connect(self._update_stats_content)
+        self._stats_refresh_timer.setInterval(1000)
 
         # Snackbar
         self.snackbar = QLabel(self)
@@ -769,6 +825,12 @@ class ImageViewer(QMainWindow):
         self.help_btn.setStyleSheet(button_style)
         self.help_btn.clicked.connect(self._toggle_help)
         self.help_btn.adjustSize()
+
+        # Stats button (bottom-left, next to help)
+        self.stats_btn = QPushButton("⏱", self)
+        self.stats_btn.setStyleSheet(button_style)
+        self.stats_btn.clicked.connect(self._toggle_stats)
+        self.stats_btn.adjustSize()
 
         # Centered open button (shown when no files)
         self.open_btn_center = QPushButton("📂 Open Folder", self)
@@ -1262,6 +1324,19 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.min_rating_filter = 0
 
+        # Resume (or start) shoot selection timer for this folder
+        prior = load_stats(str(folder))
+        if prior is not None:
+            self._shoot_persisted_elapsed = prior["elapsed"]
+            self._shoot_rated_count = prior["rated_count"]
+            self._shoot_last_rating_elapsed = prior["last_rating_elapsed"]
+        else:
+            self._shoot_persisted_elapsed = 0.0
+            self._shoot_rated_count = 0
+            self._shoot_last_rating_elapsed = None
+        self._shoot_session_start = time.time()
+        self._update_stats_content()
+
         # Update UI
         self.filmstrip.set_total(len(self.files))
         self._update_filter_buttons()
@@ -1309,8 +1384,15 @@ class ImageViewer(QMainWindow):
         # Clear all mode states
         for mode in self._mode_state:
             self._mode_state[mode] = {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+        # Persist shoot timer before clearing current folder
+        self._persist_shoot_stats()
+        self._shoot_session_start = None
+        self._shoot_persisted_elapsed = 0.0
+        self._shoot_last_rating_elapsed = None
+        self._shoot_rated_count = 0
         self._current_folder = None
         self.view_mode = "raw"
+        self._update_stats_content()
         self.content_stack.setCurrentIndex(0)
         self.title_label.setText("RAW Viewer")
         self.title_label.adjustSize()
@@ -1438,6 +1520,80 @@ class ImageViewer(QMainWindow):
             self.help_label.raise_()
         self._center_help_label()
 
+    def _center_stats_label(self):
+        """Center the stats label on screen."""
+        x = (self.width() - self.stats_label.width()) // 2
+        y = (self.height() - self.stats_label.height()) // 2
+        self.stats_label.move(x, y)
+
+    def _toggle_stats(self):
+        """Toggle shoot stats overlay visibility."""
+        visible = not self.stats_label.isVisible()
+        self._update_stats_content()
+        self.stats_label.setVisible(visible)
+        if visible:
+            self.stats_label.raise_()
+            self._stats_refresh_timer.start()
+        else:
+            self._stats_refresh_timer.stop()
+        self._center_stats_label()
+
+    def _format_duration(self, seconds: float) -> str:
+        """Format seconds as H:MM:SS or M:SS."""
+        seconds = int(seconds)
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m}:{s:02d}"
+
+    def _shoot_elapsed(self) -> float:
+        """Total elapsed time in the current shoot (persisted + session)."""
+        if self._shoot_session_start is None:
+            return self._shoot_persisted_elapsed
+        return self._shoot_persisted_elapsed + (time.time() - self._shoot_session_start)
+
+    def _persist_shoot_stats(self):
+        """Write current shoot stats to disk."""
+        if self._current_folder is None or self._shoot_session_start is None:
+            return
+        save_stats(
+            str(self._current_folder),
+            self._shoot_elapsed(),
+            self._shoot_rated_count,
+            self._shoot_last_rating_elapsed,
+        )
+
+    def _update_stats_content(self):
+        """Refresh shoot stats text."""
+        if self._shoot_session_start is None:
+            self.stats_content.setText("No shoot active.\nOpen a folder to start tracking.")
+            self.stats_label.adjustSize()
+            if self.stats_label.isVisible():
+                self._center_stats_label()
+            return
+
+        elapsed = self._shoot_elapsed()
+        total = len(self.all_files)
+        rated = self._shoot_rated_count
+        lines = [
+            f"Folder:      {self._current_folder.name if self._current_folder else '-'}",
+            f"Elapsed:     {self._format_duration(elapsed)}",
+            f"Rated:       {rated} / {total}",
+        ]
+        if self._shoot_last_rating_elapsed is not None:
+            to_last = self._shoot_last_rating_elapsed
+            lines.append(f"To last rate: {self._format_duration(to_last)}")
+            if rated > 0:
+                lines.append(f"Avg/rate:    {to_last / rated:.1f}s")
+        else:
+            lines.append("To last rate: -")
+            lines.append("Avg/rate:    -")
+        self.stats_content.setText("\n".join(lines))
+        self.stats_label.adjustSize()
+        if self.stats_label.isVisible():
+            self._center_stats_label()
+
     def _export_to_resolve(self):
         """Export current files with ratings to DaVinci Resolve."""
         if not self.files:
@@ -1552,6 +1708,8 @@ class ImageViewer(QMainWindow):
         self.filter_buttons_widget.move(btn_x, btn_y)
         # Position help button bottom-left, above filmstrip
         self.help_btn.move(10, btn_y)
+        # Position stats button next to help button
+        self.stats_btn.move(10 + self.help_btn.width() + 6, btn_y)
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
@@ -1561,6 +1719,9 @@ class ImageViewer(QMainWindow):
         # Center help label if visible
         if self.help_label.isVisible():
             self._center_help_label()
+        # Center stats label if visible
+        if self.stats_label.isVisible():
+            self._center_stats_label()
 
     def mousePressEvent(self, event: QMouseEvent):
         """Handle clicks on update label and title bar dragging."""
@@ -1694,6 +1855,8 @@ class ImageViewer(QMainWindow):
                 self.image_view.toggle_zoom()
         elif key == Qt.Key.Key_H:
             self._toggle_help()
+        elif key == Qt.Key.Key_T:
+            self._toggle_stats()
         else:
             super().keyPressEvent(event)
 
@@ -1720,6 +1883,7 @@ class ImageViewer(QMainWindow):
             return
 
         orig_idx = self.all_files.index(self.files[self.index])
+        prev_rating = self.ratings.get(orig_idx, 0)
         self.ratings[orig_idx] = rating
         current_file = self.files[self.index]
         write_rating(current_file, rating)
@@ -1727,6 +1891,20 @@ class ImageViewer(QMainWindow):
             set_green_tag(current_file, rating > 0)
         self.filmstrip.set_rating(self.index, rating)
         self._update_overlay()
+
+        # Track shoot selection progress
+        if self._shoot_session_start is not None:
+            changed = False
+            if prev_rating == 0 and rating > 0:
+                self._shoot_rated_count += 1
+                changed = True
+            elif prev_rating > 0 and rating == 0:
+                self._shoot_rated_count = max(0, self._shoot_rated_count - 1)
+                changed = True
+            if changed:
+                self._shoot_last_rating_elapsed = self._shoot_elapsed()
+                self._persist_shoot_stats()
+                self._update_stats_content()
 
         if self.index < len(self.files) - 1:
             self._navigate(1)
@@ -1783,6 +1961,8 @@ class ImageViewer(QMainWindow):
         self.time_label.setText(f"{pos // 60}:{pos % 60:02d} / {dur // 60}:{dur % 60:02d}")
 
     def closeEvent(self, event):
+        # Persist shoot stats before teardown
+        self._persist_shoot_stats()
         # Stop background preload timer
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
