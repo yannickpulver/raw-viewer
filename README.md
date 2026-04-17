@@ -4,9 +4,13 @@ Fast RAW image viewer for photo culling with Lightroom-compatible ratings and Da
 
 ![Screenshot](docs/screenshot.png)
 
-## Download
+## Install
 
-Get the latest release from the [Releases](https://github.com/yannickpulver/raw-viewer/releases) page.
+```sh
+brew install --cask yannickpulver/tap/raw-viewer
+```
+
+Or grab the latest build from the [Releases](https://github.com/yannickpulver/raw-viewer/releases) page.
 
 ## Features
 
@@ -20,15 +24,10 @@ Get the latest release from the [Releases](https://github.com/yannickpulver/raw-
 - DaVinci Resolve export with rating metadata
 - Auto-update notifications
 
-## Install
+## Development
 
 ```bash
 pip install -r requirements.txt
-```
-
-## Run
-
-```bash
 python main.py "/path/to/photos"
 ```
 
