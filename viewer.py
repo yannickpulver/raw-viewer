@@ -872,6 +872,18 @@ class ImageViewer(QMainWindow):
         self.recent_buttons: List[QPushButton] = []
         self._update_recent_folders_ui()
 
+        # Version label (bottom center on overview)
+        self.version_label = QLabel(f"v{VERSION}", self)
+        self.version_label.setStyleSheet("""
+            QLabel {
+                color: #666;
+                font-family: Menlo, Monaco, monospace;
+                font-size: 11px;
+                background: transparent;
+            }
+        """)
+        self.version_label.adjustSize()
+
         # Window setup
         self.setWindowTitle("RAW Viewer")
         self.setStyleSheet("background-color: black;")
@@ -1354,9 +1366,11 @@ class ImageViewer(QMainWindow):
         # Show centered button and recent folders only when no files
         self.open_btn_center.setVisible(not has_files)
         self.recent_container.setVisible(not has_files and len(self.recent_buttons) > 0)
+        self.version_label.setVisible(not has_files)
         # Reposition centered button
         if not has_files:
             self._center_open_button()
+            self._position_version_label()
 
     def _close_folder(self):
         """Close current folder and show open folder UI."""
@@ -1498,6 +1512,12 @@ class ImageViewer(QMainWindow):
         rc_x = (self.width() - self.recent_container.width()) // 2
         rc_y = btn_y + self.open_btn_center.height() + 15
         self.recent_container.move(rc_x, rc_y)
+
+    def _position_version_label(self):
+        """Position version label at bottom center."""
+        x = (self.width() - self.version_label.width()) // 2
+        y = self.height() - self.version_label.height() - 10
+        self.version_label.move(x, y)
 
     def _center_scanning_label(self):
         """Center the scanning label on screen."""
@@ -1711,6 +1731,9 @@ class ImageViewer(QMainWindow):
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
+        # Position version label if visible
+        if self.version_label.isVisible():
+            self._position_version_label()
         # Center scanning label if visible
         if self.scanning_label.isVisible():
             self._center_scanning_label()
