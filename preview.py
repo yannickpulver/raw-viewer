@@ -7,10 +7,17 @@ import rawpy
 import exifread
 from PIL import Image as PILImage
 from PIL import ImageCms
-from PyQt6.QtGui import QImage, QPixmap, QTransform, QImageReader
+from PyQt6.QtGui import QImage, QPixmap, QTransform, QImageReader, QColorSpace
 from PyQt6.QtCore import QByteArray, QBuffer, QIODevice, Qt, QSize
 
 _srgb_profile = ImageCms.createProfile("sRGB")
+_srgb_icc_bytes = ImageCms.ImageCmsProfile(_srgb_profile).tobytes()
+_qt_srgb = QColorSpace(QColorSpace.NamedColorSpace.SRgb)
+
+
+def _tag_srgb(image: QImage) -> QImage:
+    image.setColorSpace(_qt_srgb)
+    return image
 
 
 def get_orientation_transform(orientation: int) -> QTransform:
@@ -65,6 +72,7 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
                     data = QByteArray(converted)
                     image = QImage()
                     image.loadFromData(data, "JPEG")
+                    _tag_srgb(image)
                     pixmap = QPixmap.fromImage(image)
                 elif thumb.format == rawpy.ThumbFormat.BITMAP:
                     h, w = thumb.data.shape[:2]
@@ -73,8 +81,9 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
                         w, h,
                         3 * w,
                         QImage.Format.Format_RGB888
-                    )
-                    pixmap = QPixmap.fromImage(image.copy())
+                    ).copy()
+                    _tag_srgb(image)
+                    pixmap = QPixmap.fromImage(image)
             except rawpy.LibRawNoThumbnailError:
                 pass
 
@@ -93,8 +102,9 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
                     w, h,
                     3 * w,
                     QImage.Format.Format_RGB888
-                )
-                pixmap = QPixmap.fromImage(image.copy())
+                ).copy()
+                _tag_srgb(image)
+                pixmap = QPixmap.fromImage(image)
 
             # Apply orientation
             if pixmap and exif_orientation != 1:
@@ -137,8 +147,9 @@ def render_full_preview(path: Path) -> Optional[QPixmap]:
                 w, h,
                 3 * w,
                 QImage.Format.Format_RGB888
-            )
-            pixmap = QPixmap.fromImage(image.copy())
+            ).copy()
+            _tag_srgb(image)
+            pixmap = QPixmap.fromImage(image)
 
             if exif_orientation != 1:
                 transform = get_orientation_transform(exif_orientation)
@@ -169,6 +180,7 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
                     data = QByteArray(converted)
                     image = QImage()
                     image.loadFromData(data, "JPEG")
+                    _tag_srgb(image)
                     pixmap = QPixmap.fromImage(image)
                 elif thumb.format == rawpy.ThumbFormat.BITMAP:
                     h, w = thumb.data.shape[:2]
@@ -177,8 +189,9 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
                         w, h,
                         3 * w,
                         QImage.Format.Format_RGB888
-                    )
-                    pixmap = QPixmap.fromImage(image.copy())
+                    ).copy()
+                    _tag_srgb(image)
+                    pixmap = QPixmap.fromImage(image)
             except rawpy.LibRawNoThumbnailError:
                 # Fallback: very quick decode
                 rgb = raw.postprocess(
@@ -194,8 +207,9 @@ def extract_thumbnail(path: Path, size: int = 100) -> Optional[QPixmap]:
                     w, h,
                     3 * w,
                     QImage.Format.Format_RGB888
-                )
-                pixmap = QPixmap.fromImage(image.copy())
+                ).copy()
+                _tag_srgb(image)
+                pixmap = QPixmap.fromImage(image)
 
             if pixmap:
                 # Apply orientation
@@ -231,6 +245,17 @@ def extract_thumbnail_bytes(path: Path, size: int = 100, quality: int = 85) -> O
     return bytes(byte_array.data())
 
 
+def pixmap_from_jpeg_srgb(image_bytes: bytes) -> Optional[QPixmap]:
+    """Decode JPEG bytes to QPixmap tagged sRGB. Returns None on failure."""
+    image = QImage()
+    if not image.loadFromData(QByteArray(image_bytes), "JPEG"):
+        return None
+    if image.isNull():
+        return None
+    _tag_srgb(image)
+    return QPixmap.fromImage(image)
+
+
 def _convert_icc_to_srgb(image_bytes: bytes) -> bytes:
     """Convert JPEG with embedded ICC profile to sRGB. Returns original bytes if no profile or already sRGB."""
     try:
@@ -245,7 +270,7 @@ def _convert_icc_to_srgb(image_bytes: bytes) -> bytes:
             return image_bytes
         pil_img = ImageCms.profileToProfile(pil_img, src_profile, _srgb_profile, outputMode="RGB")
         out = io.BytesIO()
-        pil_img.save(out, format="JPEG", quality=95)
+        pil_img.save(out, format="JPEG", quality=95, icc_profile=_srgb_icc_bytes)
         return out.getvalue()
     except Exception:
         return image_bytes
@@ -267,11 +292,12 @@ def _load_jpeg_with_icc(path: Path) -> Optional[PILImage.Image]:
 
 
 def _pil_to_qpixmap(pil_img: PILImage.Image) -> QPixmap:
-    """Convert PIL Image to QPixmap."""
+    """Convert PIL Image to QPixmap (sRGB tagged)."""
     pil_img = pil_img.convert("RGB")
     data = pil_img.tobytes()
-    image = QImage(data, pil_img.width, pil_img.height, 3 * pil_img.width, QImage.Format.Format_RGB888)
-    return QPixmap.fromImage(image.copy())
+    image = QImage(data, pil_img.width, pil_img.height, 3 * pil_img.width, QImage.Format.Format_RGB888).copy()
+    _tag_srgb(image)
+    return QPixmap.fromImage(image)
 
 
 def _get_jpeg_orientation(path: Path) -> int:

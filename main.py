@@ -10,6 +10,19 @@ from scanner import scan_folder
 from viewer import ImageViewer
 
 
+def _apply_srgb_window_colorspace(widget):
+    """Tag NSWindow as sRGB so AppKit color-manages backing store to the display."""
+    try:
+        import objc
+        from AppKit import NSColorSpace
+        ns_view = objc.objc_object(c_void_p=widget.winId().__int__())
+        ns_window = ns_view.window()
+        if ns_window is not None:
+            ns_window.setColorSpace_(NSColorSpace.sRGBColorSpace())
+    except Exception as e:
+        print(f"colorspace hook failed: {e}")
+
+
 def main():
     app = QApplication(sys.argv)
 
@@ -25,6 +38,7 @@ def main():
     # Launch viewer (with or without files)
     viewer = ImageViewer(files if files else None)
     viewer.show()
+    _apply_srgb_window_colorspace(viewer)
 
     sys.exit(app.exec())
 

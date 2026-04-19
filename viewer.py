@@ -19,7 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
-from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview
+from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview, pixmap_from_jpeg_srgb as _pixmap_from_jpeg_srgb
 from rating import read_rating, write_rating, set_green_tag
 from resolve_export import export_to_resolve, is_resolve_installed
 from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
@@ -964,9 +964,8 @@ class ImageViewer(QMainWindow):
             # Check disk cache first
             cached_bytes = self.thumb_cache.get(path, size)
             if cached_bytes:
-                pixmap = QPixmap()
-                pixmap.loadFromData(cached_bytes)
-                if not pixmap.isNull():
+                pixmap = _pixmap_from_jpeg_srgb(cached_bytes)
+                if pixmap is not None:
                     self.preload_signals.thumb_loaded.emit(idx, pixmap)
                     success = True
 
@@ -981,9 +980,8 @@ class ImageViewer(QMainWindow):
                     thumb_bytes = extract_thumbnail_bytes(path, size)
                 if thumb_bytes:
                     self.thumb_cache.set(path, size, thumb_bytes)
-                    pixmap = QPixmap()
-                    pixmap.loadFromData(thumb_bytes)
-                    if not pixmap.isNull():
+                    pixmap = _pixmap_from_jpeg_srgb(thumb_bytes)
+                    if pixmap is not None:
                         self.preload_signals.thumb_loaded.emit(idx, pixmap)
                         success = True
         except Exception:
