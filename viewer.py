@@ -1308,7 +1308,10 @@ class ImageViewer(QMainWindow):
         """Handle folder scan completion."""
         self.scanning_label.setVisible(False)
 
-        if not files:
+        jpeg_count = len(self._mode_state["jpeg"]["files"])
+        video_count = len(self._mode_state["video"]["files"])
+
+        if not files and jpeg_count == 0 and video_count == 0:
             self._update_empty_state()
             return
 
@@ -1351,6 +1354,13 @@ class ImageViewer(QMainWindow):
         self.filmstrip.set_total(len(self.files))
         self._update_filter_buttons()
         self._update_empty_state()
+
+        # Auto-switch to JPEG/video viewer if no raws but other media exist
+        if not files and (jpeg_count > 0 or video_count > 0):
+            target = "jpeg" if jpeg_count >= video_count else "video"
+            self._switch_view_mode(target)
+            return
+
         self._load_current()
         self._preload_nearby()
         self._preload_all_thumbnails()
@@ -1705,10 +1715,14 @@ class ImageViewer(QMainWindow):
             btn.setStyleSheet(btn_style)
             btn.setToolTip(folder)
             btn.clicked.connect(lambda checked, f=folder: self._open_recent_folder(f))
+            btn.adjustSize()
             self.recent_layout.addWidget(btn)
             self.recent_buttons.append(btn)
 
+        self.recent_layout.activate()
         self.recent_container.adjustSize()
+        if self.recent_container.isVisible():
+            self._center_open_button()
 
     def _open_recent_folder(self, folder: str):
         """Open a folder from recent list."""
