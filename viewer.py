@@ -820,6 +820,23 @@ class ImageViewer(QMainWindow):
         self.filter_buttons[0].setChecked(True)
         self.filter_buttons_widget.adjustSize()
 
+        # Mode switcher buttons (top-left)
+        self.mode_switcher = QWidget(self)
+        self.mode_switcher.setStyleSheet("background: transparent;")
+        ms_layout = QHBoxLayout(self.mode_switcher)
+        ms_layout.setContentsMargins(0, 0, 0, 0)
+        ms_layout.setSpacing(4)
+        self.mode_buttons: Dict[str, QPushButton] = {}
+        for mode, label in [("raw", "RAW"), ("jpeg", "JPG"), ("video", "MOV")]:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setStyleSheet(button_style)
+            btn.clicked.connect(lambda checked, m=mode: self._on_mode_button(m))
+            ms_layout.addWidget(btn)
+            self.mode_buttons[mode] = btn
+        self.mode_switcher.adjustSize()
+        self.mode_switcher.setVisible(False)
+
         # Help button (standalone, bottom-left, always visible)
         self.help_btn = QPushButton("?", self)
         self.help_btn.setStyleSheet(button_style)
@@ -1381,6 +1398,7 @@ class ImageViewer(QMainWindow):
         if not has_files:
             self._center_open_button()
             self._position_version_label()
+        self._update_mode_switcher()
 
     def _close_folder(self):
         """Close current folder and show open folder UI."""
@@ -1445,6 +1463,63 @@ class ImageViewer(QMainWindow):
         self.ratings = state["ratings"]
         self.min_rating_filter = state["min_rating_filter"]
 
+    def _on_mode_button(self, mode: str):
+        """Handle mode switcher button click."""
+        if mode == self.view_mode:
+            self._update_mode_switcher()
+            return
+        if not self._mode_state[mode]["files"]:
+            self._update_mode_switcher()
+            return
+        # Save current, switch directly without toggle-back behavior
+        if hasattr(self, '_bg_preload_timer'):
+            self._bg_preload_timer.stop()
+        if self.view_mode == "video":
+            self.player.stop()
+        self._save_mode_state(self.view_mode)
+        self._load_mode_state(mode)
+        self.view_mode = mode
+        self.loading.clear()
+        self.thumb_loading.clear()
+        self.thumb_failed.clear()
+        self.filmstrip.thumbnails.clear()
+        titles = {"raw": "RAW Viewer", "jpeg": "JPEG Viewer", "video": "Video Viewer"}
+        self.title_label.setText(titles[self.view_mode])
+        self.title_label.adjustSize()
+        self.content_stack.setCurrentIndex(1 if self.view_mode == "video" else 0)
+        self.filmstrip.set_total(len(self.files))
+        self._update_filter_buttons()
+        self._update_empty_state()
+        if self.files:
+            self._load_current()
+            self._preload_nearby()
+            self._preload_all_thumbnails()
+        else:
+            if self.view_mode != "video":
+                self.image_view.set_pixmap(QPixmap())
+        self._update_overlay()
+        self._update_mode_switcher()
+
+    def _update_mode_switcher(self):
+        """Show/hide mode buttons based on available files; mark current as checked."""
+        labels = {"raw": "RAW", "jpeg": "JPG", "video": "MOV"}
+        any_visible = False
+        for mode, btn in self.mode_buttons.items():
+            if mode == self.view_mode:
+                count = len(self.files)
+            else:
+                count = len(self._mode_state[mode]["files"])
+            available = count > 0
+            btn.setVisible(available)
+            btn.setChecked(mode == self.view_mode)
+            btn.setText(f"{labels[mode]} ({count})" if available else labels[mode])
+            if available:
+                any_visible = True
+        self.mode_switcher.adjustSize()
+        self.mode_switcher.setVisible(any_visible)
+        self.mode_switcher.move(80, 8)
+        self.mode_switcher.raise_()
+
     def _switch_view_mode(self, target_mode: str):
         """Switch to target mode, or back to raw if already in it."""
         if not self._current_folder:
@@ -1497,6 +1572,7 @@ class ImageViewer(QMainWindow):
             if self.view_mode != "video":
                 self.image_view.set_pixmap(QPixmap())
         self._update_overlay()
+        self._update_mode_switcher()
 
     def _toggle_filmstrip(self):
         """Toggle filmstrip visibility."""
@@ -1742,6 +1818,8 @@ class ImageViewer(QMainWindow):
         self.help_btn.move(10, btn_y)
         # Position stats button next to help button
         self.stats_btn.move(10 + self.help_btn.width() + 6, btn_y)
+        # Position mode switcher top-left
+        self.mode_switcher.move(80, 8)
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()
