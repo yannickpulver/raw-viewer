@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """RAW image viewer with rating support."""
 
+import os
 import sys
 from pathlib import Path
+
+# Use native AVFoundation media backend (honors clip frame timing; the default
+# FFmpeg backend plays 60fps/slow-mo clips too fast). Must be set before Qt loads.
+os.environ.setdefault("QT_MEDIA_BACKEND", "darwin")
 
 from PyQt6.QtWidgets import QApplication
 
