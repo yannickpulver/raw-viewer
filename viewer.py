@@ -2005,8 +2005,12 @@ class ImageViewer(QMainWindow):
                 self._set_rating(num)
         elif key == Qt.Key.Key_X and event.modifiers() == Qt.KeyboardModifier.NoModifier:
             if self.files:
-                orig_idx = self.path_index[self.files[self.index]]
-                current = self.ratings.get(orig_idx, 0)
+                if self.compare_pinned is not None and self.compare_focus == "left":
+                    target = self.compare_pinned
+                else:
+                    target = self.files[self.index]
+                orig_idx = self.path_index.get(target)
+                current = self.ratings.get(orig_idx, 0) if orig_idx is not None else 0
                 self._set_rating(0 if current == -1 else -1)
         elif key == Qt.Key.Key_I:
             self.show_info = not self.show_info
