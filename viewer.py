@@ -38,6 +38,7 @@ class PreloadSignals(QObject):
     scan_progress = pyqtSignal(int, int)  # current, total
     resolve_status = pyqtSignal(str)  # status message
     resolve_done = pyqtSignal(bool, str)  # success, message
+    rating_write_failed = pyqtSignal(str)  # filename
 
 
 class ZoomableImageView(QGraphicsView):
@@ -455,10 +456,13 @@ class ImageViewer(QMainWindow):
         self.preload_signals.update_available.connect(self._on_update_available)
         self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
         self.preload_signals.scan_progress.connect(self._on_scan_progress)
+        self.preload_signals.rating_write_failed.connect(
+            lambda name: self._show_snackbar(f"Failed to save rating for {name}", 4000))
         self.current_executor = ThreadPoolExecutor(max_workers=1)  # Current image (highest priority)
         self.executor = ThreadPoolExecutor(max_workers=6)  # Nearby preloads
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.render_executor = ThreadPoolExecutor(max_workers=1)  # Full RAW renders (low priority)
+        self.rating_executor = ThreadPoolExecutor(max_workers=1)  # XMP sidecar writes
         self.loading: set = set()
         self.thumb_loading: set = set()
         self.thumb_failed: set = set()  # Track failed thumbnails for progress
@@ -2010,9 +2014,7 @@ class ImageViewer(QMainWindow):
         prev_rating = self.ratings.get(orig_idx, 0)
         self.ratings[orig_idx] = rating
         current_file = self.files[self.index]
-        write_rating(current_file, rating)
-        if self.view_mode in ("jpeg", "video"):
-            set_green_tag(current_file, rating > 0)
+        self.rating_executor.submit(self._write_rating_task, current_file, rating, self.view_mode)
         self.filmstrip.set_rating(self.index, rating)
         self._update_overlay()
 
@@ -2032,6 +2034,14 @@ class ImageViewer(QMainWindow):
 
         if self.index < len(self.files) - 1:
             self._navigate(1)
+
+    def _write_rating_task(self, path: Path, rating: int, mode: str):
+        """Runs on rating_executor. Single worker keeps writes ordered per path."""
+        ok = write_rating(path, rating)
+        if mode in ("jpeg", "video"):
+            set_green_tag(path, rating > 0)
+        if not ok:
+            self.preload_signals.rating_write_failed.emit(path.name)
 
     def showEvent(self, event):
         """Configure transparent titlebar after window is shown."""
@@ -2091,6 +2101,7 @@ class ImageViewer(QMainWindow):
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
         self.player.stop()
+        self.rating_executor.shutdown(wait=True)
         self.executor.shutdown(wait=False)
         self.thumb_executor.shutdown(wait=False)
         super().closeEvent(event)
