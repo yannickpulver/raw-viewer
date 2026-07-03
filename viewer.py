@@ -430,6 +430,7 @@ class ImageViewer(QMainWindow):
         super().__init__()
         self.files = files or []
         self.all_files = self.files  # Keep original list
+        self.path_index: Dict[Path, int] = {f: i for i, f in enumerate(self.all_files)}
         self.index = 0
         self.cache: Dict[int, QPixmap] = {}
         self.ratings: Dict[int, int] = {}  # Maps original index to rating
@@ -942,7 +943,9 @@ class ImageViewer(QMainWindow):
     def _on_thumb_loaded(self, idx: int, pixmap: QPixmap):
         self.filmstrip.set_thumbnail(idx, pixmap)
         # Update rating in filmstrip
-        orig_idx = self.all_files.index(self.files[idx])
+        orig_idx = self.path_index.get(self.files[idx])
+        if orig_idx is None:
+            return
         rating = self.ratings.get(orig_idx, 0)
         self.filmstrip.set_rating(idx, rating)
 
@@ -983,7 +986,9 @@ class ImageViewer(QMainWindow):
         success = False
         try:
             # Load rating too
-            orig_idx = self.all_files.index(self.files[idx])
+            orig_idx = self.path_index.get(self.files[idx])
+            if orig_idx is None:
+                return
             if orig_idx not in self.ratings:
                 rating = read_rating(self.files[idx])
                 self.ratings[orig_idx] = rating if rating is not None else 0
@@ -1136,7 +1141,7 @@ class ImageViewer(QMainWindow):
                         self.current_executor.submit(self._preload_one, idx)
 
         # Load rating (use original index)
-        orig_idx = self.all_files.index(self.files[self.index])
+        orig_idx = self.path_index[self.files[self.index]]
         if orig_idx not in self.ratings:
             rating = read_rating(self.files[self.index])
             self.ratings[orig_idx] = rating if rating is not None else 0
@@ -1175,7 +1180,7 @@ class ImageViewer(QMainWindow):
         filename = current_file.name
         creation_time = get_creation_time(current_file)
         date_str = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M")
-        orig_idx = self.all_files.index(current_file)
+        orig_idx = self.path_index[current_file]
         rating = self.ratings.get(orig_idx, 0)
         stars = "★" * rating + "☆" * (5 - rating) if rating else "☆☆☆☆☆"
         self.info_label.setText(f"{filename}  |  {date_str}  |  {stars}")
@@ -1351,6 +1356,7 @@ class ImageViewer(QMainWindow):
         # Load new files
         self.files = files
         self.all_files = files
+        self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
 
@@ -1419,6 +1425,7 @@ class ImageViewer(QMainWindow):
         self.filmstrip.thumbnails.clear()
         self.files = []
         self.all_files = []
+        self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
         # Clear all mode states
@@ -1462,6 +1469,10 @@ class ImageViewer(QMainWindow):
         self.cache = state["cache"]
         self.ratings = state["ratings"]
         self.min_rating_filter = state["min_rating_filter"]
+        self._rebuild_path_index()
+
+    def _rebuild_path_index(self):
+        self.path_index = {f: i for i, f in enumerate(self.all_files)}
 
     def _on_mode_button(self, mode: str):
         """Handle mode switcher button click."""
@@ -1939,7 +1950,7 @@ class ImageViewer(QMainWindow):
                 self._load_all_ratings()
                 # Find last rated image in current view
                 for i in range(len(self.files) - 1, -1, -1):
-                    orig_idx = self.all_files.index(self.files[i])
+                    orig_idx = self.path_index[self.files[i]]
                     if self.ratings.get(orig_idx, 0) > 0:
                         self.index = i
                         self._load_current()
@@ -1995,7 +2006,7 @@ class ImageViewer(QMainWindow):
         if not self.files:
             return
 
-        orig_idx = self.all_files.index(self.files[self.index])
+        orig_idx = self.path_index[self.files[self.index]]
         prev_rating = self.ratings.get(orig_idx, 0)
         self.ratings[orig_idx] = rating
         current_file = self.files[self.index]
