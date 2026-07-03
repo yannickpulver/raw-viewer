@@ -113,7 +113,8 @@ def _scan_and_sort(
         raise ValueError(f"Not a directory: {folder}")
 
     matched = []
-    for root, _, files in os.walk(folder):
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != "_rejected"]
         for f in files:
             path = Path(root) / f
             if file_predicate(path):
