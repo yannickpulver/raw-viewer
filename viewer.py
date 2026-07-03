@@ -12,7 +12,7 @@ import time
 
 from version import VERSION
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer, QUrl
 
@@ -499,7 +499,17 @@ class ImageViewer(QMainWindow):
         self.content_stack = QStackedWidget()
 
         self.image_view = ZoomableImageView()
-        self.content_stack.addWidget(self.image_view)
+        self.compare_view = ZoomableImageView()
+        self.compare_view.setVisible(False)
+        self.image_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.image_splitter.addWidget(self.compare_view)   # pinned (left)
+        self.image_splitter.addWidget(self.image_view)     # cursor (right)
+        self.content_stack.addWidget(self.image_splitter)
+
+        self.compare_pinned: Optional[Path] = None
+        self.compare_focus = "right"
+        self.image_view.viewport().installEventFilter(self)
+        self.compare_view.viewport().installEventFilter(self)
 
         # Video container with player and timeline
         self.video_container = QWidget()
@@ -654,6 +664,7 @@ class ImageViewer(QMainWindow):
   H            Toggle this help
   T            Toggle shoot stats
 
+  C            Compare with pinned image
   O            Show in Finder
   ⌘L          Open all in Lightroom
   ⌘D          Export to DaVinci Resolve
@@ -969,6 +980,53 @@ class ImageViewer(QMainWindow):
                 return load_jpeg_preview(self.files[idx])
             return extract_preview(self.files[idx])
         return None
+
+    def _toggle_compare(self):
+        """Pin current image left; navigation moves the right pane only."""
+        if self.view_mode == "video" or not self.files:
+            return
+        if self.compare_pinned is not None:
+            self._exit_compare()
+            return
+        path = self.files[self.index]
+        pixmap = self.cache.get(path) or self._load_sync(self.index)
+        if not pixmap:
+            return
+        self.compare_pinned = path
+        self.compare_view.set_pixmap(pixmap)
+        self.compare_view.setVisible(True)
+        half = max(1, self.image_splitter.width() // 2)
+        self.image_splitter.setSizes([half, half])
+        self.compare_focus = "right"
+        self._update_compare_borders()
+
+    def _exit_compare(self):
+        if self.compare_pinned is None:
+            return
+        self.compare_pinned = None
+        self.compare_view.setVisible(False)
+        self.compare_view.set_pixmap(QPixmap())
+        self._update_compare_borders()
+
+    def _update_compare_borders(self):
+        if self.compare_pinned is None:
+            self.compare_view.setStyleSheet("")
+            self.image_view.setStyleSheet("")
+            return
+        focused = "border: 2px solid #ffb400;"
+        unfocused = "border: 2px solid transparent;"
+        self.compare_view.setStyleSheet(focused if self.compare_focus == "left" else unfocused)
+        self.image_view.setStyleSheet(focused if self.compare_focus == "right" else unfocused)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress and self.compare_pinned is not None:
+            if obj is self.compare_view.viewport():
+                self.compare_focus = "left"
+                self._update_compare_borders()
+            elif obj is self.image_view.viewport():
+                self.compare_focus = "right"
+                self._update_compare_borders()
+        return super().eventFilter(obj, event)
 
     def _load_thumb_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
@@ -1343,6 +1401,7 @@ class ImageViewer(QMainWindow):
 
     def _on_folder_scanned(self, files: list, folder: Path):
         """Handle folder scan completion."""
+        self._exit_compare()
         self.scanning_label.setVisible(False)
 
         jpeg_count = len(self._mode_state["jpeg"]["files"])
@@ -1426,6 +1485,7 @@ class ImageViewer(QMainWindow):
         has_any = self.files or any(s["files"] for s in self._mode_state.values())
         if not has_any:
             return
+        self._exit_compare()
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
@@ -1502,6 +1562,7 @@ class ImageViewer(QMainWindow):
         if not self._mode_state[mode]["files"]:
             self._update_mode_switcher()
             return
+        self._exit_compare()
         # Save current, switch directly without toggle-back behavior
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
@@ -1555,6 +1616,7 @@ class ImageViewer(QMainWindow):
         """Switch to target mode, or back to raw if already in it."""
         if not self._current_folder:
             return
+        self._exit_compare()
         # Don't switch to JPEG if no JPEGs available
         if self.view_mode == "raw" and target_mode == "jpeg" and not self._mode_state["jpeg"]["files"]:
             self._show_snackbar("No JPEG files found in this folder")
@@ -1986,7 +2048,12 @@ class ImageViewer(QMainWindow):
             if self.files:
                 subprocess.run(['open', '-R', str(self.files[self.index])])
         elif key == Qt.Key.Key_Escape:
-            self._close_folder()
+            if self.compare_pinned is not None:
+                self._exit_compare()
+            else:
+                self._close_folder()
+        elif key == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            self._toggle_compare()
         elif key == Qt.Key.Key_S and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self._toggle_filmstrip()
@@ -2030,6 +2097,16 @@ class ImageViewer(QMainWindow):
     def _set_rating(self, rating: int):
         if not self.files:
             return
+
+        if self.compare_pinned is not None and self.compare_focus == "left":
+            orig_idx = self.path_index.get(self.compare_pinned)
+            if orig_idx is None:
+                return
+            self.ratings[orig_idx] = rating
+            self.rating_executor.submit(self._write_rating_task, self.compare_pinned, rating, self.view_mode)
+            if self.compare_pinned in self.files:
+                self.filmstrip.set_rating(self.files.index(self.compare_pinned), rating)
+            return  # pinned side never auto-advances
 
         orig_idx = self.path_index[self.files[self.index]]
         prev_rating = self.ratings.get(orig_idx, 0)
