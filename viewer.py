@@ -20,6 +20,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview, pixmap_from_jpeg_srgb as _pixmap_from_jpeg_srgb
+from pixmap_cache import LruByteCache
 from rating import read_rating, write_rating, set_green_tag
 from resolve_export import export_to_resolve, is_resolve_installed
 from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
@@ -425,7 +426,7 @@ class FilmstripWidget(QScrollArea):
 
 
 class ImageViewer(QMainWindow):
-    CACHE_SIZE = 15
+    CACHE_MAX_BYTES = 1_500_000_000  # ~1.5 GB of decoded previews
 
     def __init__(self, files: Optional[List[Path]] = None):
         super().__init__()
@@ -433,7 +434,7 @@ class ImageViewer(QMainWindow):
         self.all_files = self.files  # Keep original list
         self.path_index: Dict[Path, int] = {f: i for i, f in enumerate(self.all_files)}
         self.index = 0
-        self.cache: Dict[int, QPixmap] = {}
+        self.cache = LruByteCache(self.CACHE_MAX_BYTES)
         self.ratings: Dict[int, int] = {}  # Maps original index to rating
         self.show_info = True
         self.filmstrip_visible = True
@@ -443,11 +444,7 @@ class ImageViewer(QMainWindow):
         self.view_mode: str = "raw"
         self._current_folder: Optional[Path] = None
         # Per-mode state storage
-        self._mode_state: Dict[str, dict] = {
-            "raw": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-            "jpeg": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-            "video": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-        }
+        self._mode_state: Dict[str, dict] = {m: self._empty_mode_state() for m in ("raw", "jpeg", "video")}
 
         # Preloading - separate executors for previews and thumbnails
         self.preload_signals = PreloadSignals()
@@ -935,7 +932,9 @@ class ImageViewer(QMainWindow):
 
     def _on_preloaded(self, idx: int, pixmap: QPixmap):
         with self.lock:
-            self.cache[idx] = pixmap
+            if 0 <= idx < len(self.files) and pixmap:
+                cost = pixmap.width() * pixmap.height() * 4
+                self.cache.put(self.files[idx], pixmap, cost)
             self.loading.discard(idx)
         if idx == self.index and pixmap:
             self._display(pixmap)
@@ -1037,10 +1036,9 @@ class ImageViewer(QMainWindow):
         for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]:
             idx = self.index + offset
             with self.lock:
-                if 0 <= idx < len(self.files) and idx not in self.cache and idx not in self.loading:
+                if 0 <= idx < len(self.files) and self.files[idx] not in self.cache and idx not in self.loading:
                     self.loading.add(idx)
                     self.executor.submit(self._preload_one, idx)
-        self._trim_cache()
 
     def _preload_thumbnails(self):
         """Preload thumbnails around current index (for navigation)."""
@@ -1109,12 +1107,6 @@ class ImageViewer(QMainWindow):
             self.thumb_executor.submit(self._preload_thumb, idx)
             loaded += 1
 
-    def _trim_cache(self):
-        with self.lock:
-            to_remove = [k for k in self.cache.keys() if abs(k - self.index) > self.CACHE_SIZE // 2]
-            for k in to_remove:
-                del self.cache[k]
-
     def _load_current(self):
         if not self.files:
             return
@@ -1129,7 +1121,7 @@ class ImageViewer(QMainWindow):
             self.content_stack.setCurrentIndex(0)
             # Use cached full preview if available (instant)
             with self.lock:
-                cached = self.cache.get(self.index)
+                cached = self.cache.get(self.files[self.index])
             if cached:
                 self._display(cached)
             else:
@@ -1317,8 +1309,8 @@ class ImageViewer(QMainWindow):
             files = scan_folder(folder, progress_callback=progress)
             jpeg_files = scan_folder_jpeg(folder)
             video_files = scan_folder_video(folder)
-            self._mode_state["jpeg"] = {"files": jpeg_files, "all_files": jpeg_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
-            self._mode_state["video"] = {"files": video_files, "all_files": video_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+            self._mode_state["jpeg"] = {**self._empty_mode_state(), "files": jpeg_files, "all_files": jpeg_files}
+            self._mode_state["video"] = {**self._empty_mode_state(), "files": video_files, "all_files": video_files}
             self.preload_signals.folder_scanned.emit(files, folder)
 
         threading.Thread(target=scan, daemon=True).start()
@@ -1434,7 +1426,7 @@ class ImageViewer(QMainWindow):
         self.min_rating_filter = 0
         # Clear all mode states
         for mode in self._mode_state:
-            self._mode_state[mode] = {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+            self._mode_state[mode] = self._empty_mode_state()
         # Persist shoot timer before clearing current folder
         self._persist_shoot_stats()
         self._shoot_session_start = None
@@ -1452,6 +1444,11 @@ class ImageViewer(QMainWindow):
         self._update_overlay()
         self._update_filter_buttons()
         self._update_empty_state()
+
+    def _empty_mode_state(self) -> dict:
+        return {"files": [], "all_files": [], "index": 0,
+                "cache": LruByteCache(self.CACHE_MAX_BYTES),
+                "ratings": {}, "min_rating_filter": 0}
 
     def _save_mode_state(self, mode: str):
         """Save current active state to the given mode's storage."""

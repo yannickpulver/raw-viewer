@@ -111,6 +111,13 @@ def extract_preview(path: Path, thumbnail: bool = False) -> Optional[QPixmap]:
                 transform = get_orientation_transform(exif_orientation)
                 pixmap = pixmap.transformed(transform)
 
+            if pixmap and max(pixmap.width(), pixmap.height()) > 2560:
+                pixmap = pixmap.scaled(
+                    2560, 2560,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+
             return pixmap
 
     except Exception as e:
