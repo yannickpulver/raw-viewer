@@ -303,6 +303,14 @@ class FilmstripContent(QWidget):
                 dot_start_x = x + (self.THUMB_SIZE - rating * 8) // 2
                 for r in range(rating):
                     painter.drawEllipse(dot_start_x + r * 8, dot_y, 5, 5)
+            elif rating == -1:
+                painter.setPen(QPen(QColor(230, 70, 70), 2))
+                font = painter.font()
+                font.setPixelSize(12)
+                font.setBold(True)
+                painter.setFont(font)
+                painter.drawText(x, y + self.THUMB_SIZE + 2, self.THUMB_SIZE, 14,
+                                 Qt.AlignmentFlag.AlignCenter, "✕")
 
         painter.end()
 
@@ -631,6 +639,7 @@ class ImageViewer(QMainWindow):
 
   ←/→         Navigate images
   0-5          Rate current image
+  X            Reject (toggle)
   ⌘0-5        Filter by rating
 
   S            Go to start
@@ -810,7 +819,7 @@ class ImageViewer(QMainWindow):
         filter_layout.addSpacing(10)
 
         # Filter buttons
-        labels = ["All", "1+", "2+", "3+", "4+", "5"]
+        labels = ["All", "1+", "2+", "3+", "4+", "5", "✕"]
         for i, label in enumerate(labels):
             btn = QPushButton(label)
             btn.setCheckable(True)
@@ -1166,6 +1175,8 @@ class ImageViewer(QMainWindow):
         position = f"{self.index + 1}/{len(self.files)}"
         if self.min_rating_filter > 0:
             position += f"  (≥{self.min_rating_filter}★)"
+        elif self.min_rating_filter == -1:
+            position += "  (✕)"
         self.pos_label.setText(position)
         self.pos_label.adjustSize()
         self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
@@ -1178,17 +1189,21 @@ class ImageViewer(QMainWindow):
         date_str = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M")
         orig_idx = self.path_index[current_file]
         rating = self.ratings.get(orig_idx, 0)
-        stars = "★" * rating + "☆" * (5 - rating) if rating else "☆☆☆☆☆"
+        if rating == -1:
+            stars = "✕ rejected"
+        else:
+            stars = "★" * rating + "☆" * (5 - rating) if rating > 0 else "☆☆☆☆☆"
         self.info_label.setText(f"{filename}  |  {date_str}  |  {stars}")
         self.info_label.adjustSize()
         self.info_label.move(self.width() - self.info_label.width() - 10, 10 + self.pos_label.height())
         self.info_label.setVisible(self.show_info)
 
         # Filter label (shown when filter active)
-        if self.min_rating_filter > 0:
+        if self.min_rating_filter != 0:
             total_filtered = len(self.files)
             total_all = len(self.all_files)
-            self.filter_label.setText(f"Filter: ≥{self.min_rating_filter}★  ({total_filtered}/{total_all})")
+            filter_desc = "✕" if self.min_rating_filter == -1 else f"≥{self.min_rating_filter}★"
+            self.filter_label.setText(f"Filter: {filter_desc}  ({total_filtered}/{total_all})")
             self.filter_label.adjustSize()
             self.filter_label.move(10, 10)
             self.filter_label.setVisible(True)
@@ -1238,6 +1253,9 @@ class ImageViewer(QMainWindow):
 
         if min_rating == 0:
             self.files = self.all_files
+        elif min_rating == -1:
+            self._load_all_ratings()
+            self.files = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
         else:
             # Load all ratings first
             self._load_all_ratings()
@@ -1266,13 +1284,14 @@ class ImageViewer(QMainWindow):
         self._update_filter_buttons()
 
     def _on_filter_button(self, idx: int):
-        """Handle filter button click."""
-        self._apply_filter(idx)
+        """Handle filter button click. Button 6 = rejected-only bucket."""
+        self._apply_filter(-1 if idx == 6 else idx)
 
     def _update_filter_buttons(self):
         """Update filter button states."""
+        active_idx = 6 if self.min_rating_filter == -1 else self.min_rating_filter
         for i, btn in enumerate(self.filter_buttons):
-            btn.setChecked(i == self.min_rating_filter)
+            btn.setChecked(i == active_idx)
 
     def _open_folder(self):
         """Open folder picker and load new files."""
@@ -1922,6 +1941,11 @@ class ImageViewer(QMainWindow):
             elif event.modifiers() == Qt.KeyboardModifier.NoModifier:
                 # Number = rate
                 self._set_rating(num)
+        elif key == Qt.Key.Key_X and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if self.files:
+                orig_idx = self.path_index[self.files[self.index]]
+                current = self.ratings.get(orig_idx, 0)
+                self._set_rating(0 if current == -1 else -1)
         elif key == Qt.Key.Key_I:
             self.show_info = not self.show_info
             self._update_overlay()
@@ -2018,10 +2042,10 @@ class ImageViewer(QMainWindow):
         # Track shoot selection progress
         if self._shoot_session_start is not None:
             changed = False
-            if prev_rating == 0 and rating > 0:
+            if prev_rating <= 0 and rating > 0:
                 self._shoot_rated_count += 1
                 changed = True
-            elif prev_rating > 0 and rating == 0:
+            elif prev_rating > 0 and rating <= 0:
                 self._shoot_rated_count = max(0, self._shoot_rated_count - 1)
                 changed = True
             if changed:
