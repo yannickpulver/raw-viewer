@@ -29,8 +29,8 @@ def read_rating(raw_path: Path) -> Optional[int]:
 
     try:
         content = xmp_path.read_text(encoding='utf-8')
-        # Match xmp:Rating="N" or xmp:Rating='N'
-        match = re.search(r'xmp:Rating=["\'](\d)["\']', content)
+        # Match xmp:Rating="N" or xmp:Rating='N' (including negative for reject: -1)
+        match = re.search(r'xmp:Rating=["\'](-?\d)["\']', content)
         if match:
             return int(match.group(1))
         return None
@@ -41,7 +41,7 @@ def read_rating(raw_path: Path) -> Optional[int]:
 def write_rating(raw_path: Path, rating: int) -> bool:
     """Write rating to XMP sidecar. Creates or updates file."""
     xmp_path = get_xmp_path(raw_path)
-    rating = max(0, min(5, rating))  # Clamp to 0-5
+    rating = max(-1, min(5, rating))  # Clamp to -1..5 (-1 = rejected)
 
     try:
         if xmp_path.exists():
@@ -49,10 +49,10 @@ def write_rating(raw_path: Path, rating: int) -> bool:
             content = xmp_path.read_text(encoding='utf-8')
 
             # Check if Rating attribute exists
-            if re.search(r'xmp:Rating=["\']?\d["\']?', content):
+            if re.search(r'xmp:Rating=["\']?-?\d["\']?', content):
                 # Update existing rating
                 content = re.sub(
-                    r'(xmp:Rating=["\']?)\d(["\']?)',
+                    r'(xmp:Rating=["\']?)-?\d(["\']?)',
                     f'\\g<1>{rating}\\g<2>',
                     content
                 )

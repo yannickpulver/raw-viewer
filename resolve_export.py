@@ -152,8 +152,9 @@ def export_to_resolve(
 
     # Build filename -> rating lookup
     file_ratings: Dict[str, int] = {}
+    index_of = {p: i for i, p in enumerate(all_files)}
     for f in files:
-        idx = all_files.index(f) if f in all_files else -1
+        idx = index_of.get(f, -1)
         if idx >= 0:
             rating = ratings.get(idx, 0)
         else:

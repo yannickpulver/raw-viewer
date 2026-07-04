@@ -12,7 +12,7 @@ import time
 
 from version import VERSION
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter, QMessageBox
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer, QUrl
 
@@ -20,6 +20,7 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 
 from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes, load_jpeg_preview, load_jpeg_thumbnail_bytes, needs_full_render, render_full_preview, pixmap_from_jpeg_srgb as _pixmap_from_jpeg_srgb
+from pixmap_cache import LruByteCache
 from rating import read_rating, write_rating, set_green_tag
 from resolve_export import export_to_resolve, is_resolve_installed
 from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
@@ -27,17 +28,19 @@ from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
 from shoot_stats import load_stats, save_stats
+from move_rejected import collect_move_set, move_to_rejected, REJECTED_DIR_NAME
 
 
 class PreloadSignals(QObject):
     """Signals for background preloading."""
-    loaded = pyqtSignal(int, QPixmap)
+    loaded = pyqtSignal(int, object, QPixmap)  # idx, path, pixmap
     thumb_loaded = pyqtSignal(int, QPixmap)
     update_available = pyqtSignal(str, str)  # latest_version, download_url
     folder_scanned = pyqtSignal(list, Path)  # files, folder
     scan_progress = pyqtSignal(int, int)  # current, total
     resolve_status = pyqtSignal(str)  # status message
     resolve_done = pyqtSignal(bool, str)  # success, message
+    rating_write_failed = pyqtSignal(str)  # filename
 
 
 class ZoomableImageView(QGraphicsView):
@@ -301,6 +304,14 @@ class FilmstripContent(QWidget):
                 dot_start_x = x + (self.THUMB_SIZE - rating * 8) // 2
                 for r in range(rating):
                     painter.drawEllipse(dot_start_x + r * 8, dot_y, 5, 5)
+            elif rating == -1:
+                painter.setPen(QPen(QColor(230, 70, 70), 2))
+                font = painter.font()
+                font.setPixelSize(12)
+                font.setBold(True)
+                painter.setFont(font)
+                painter.drawText(x, y + self.THUMB_SIZE + 2, self.THUMB_SIZE, 14,
+                                 Qt.AlignmentFlag.AlignCenter, "✕")
 
         painter.end()
 
@@ -424,14 +435,15 @@ class FilmstripWidget(QScrollArea):
 
 
 class ImageViewer(QMainWindow):
-    CACHE_SIZE = 15
+    CACHE_MAX_BYTES = 1_500_000_000  # ~1.5 GB of decoded previews
 
     def __init__(self, files: Optional[List[Path]] = None):
         super().__init__()
         self.files = files or []
         self.all_files = self.files  # Keep original list
+        self.path_index: Dict[Path, int] = {f: i for i, f in enumerate(self.all_files)}
         self.index = 0
-        self.cache: Dict[int, QPixmap] = {}
+        self.cache = LruByteCache(self.CACHE_MAX_BYTES)
         self.ratings: Dict[int, int] = {}  # Maps original index to rating
         self.show_info = True
         self.filmstrip_visible = True
@@ -441,11 +453,7 @@ class ImageViewer(QMainWindow):
         self.view_mode: str = "raw"
         self._current_folder: Optional[Path] = None
         # Per-mode state storage
-        self._mode_state: Dict[str, dict] = {
-            "raw": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-            "jpeg": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-            "video": {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0},
-        }
+        self._mode_state: Dict[str, dict] = {m: self._empty_mode_state() for m in ("raw", "jpeg", "video")}
 
         # Preloading - separate executors for previews and thumbnails
         self.preload_signals = PreloadSignals()
@@ -454,10 +462,13 @@ class ImageViewer(QMainWindow):
         self.preload_signals.update_available.connect(self._on_update_available)
         self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
         self.preload_signals.scan_progress.connect(self._on_scan_progress)
+        self.preload_signals.rating_write_failed.connect(
+            lambda name: self._show_snackbar(f"Failed to save rating for {name}", 4000))
         self.current_executor = ThreadPoolExecutor(max_workers=1)  # Current image (highest priority)
         self.executor = ThreadPoolExecutor(max_workers=6)  # Nearby preloads
         self.thumb_executor = ThreadPoolExecutor(max_workers=4)  # Thumbnails
         self.render_executor = ThreadPoolExecutor(max_workers=1)  # Full RAW renders (low priority)
+        self.rating_executor = ThreadPoolExecutor(max_workers=1)  # XMP sidecar writes
         self.loading: set = set()
         self.thumb_loading: set = set()
         self.thumb_failed: set = set()  # Track failed thumbnails for progress
@@ -489,7 +500,17 @@ class ImageViewer(QMainWindow):
         self.content_stack = QStackedWidget()
 
         self.image_view = ZoomableImageView()
-        self.content_stack.addWidget(self.image_view)
+        self.compare_view = ZoomableImageView()
+        self.compare_view.setVisible(False)
+        self.image_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.image_splitter.addWidget(self.compare_view)   # pinned (left)
+        self.image_splitter.addWidget(self.image_view)     # cursor (right)
+        self.content_stack.addWidget(self.image_splitter)
+
+        self.compare_pinned: Optional[Path] = None
+        self.compare_focus = "right"
+        self.image_view.viewport().installEventFilter(self)
+        self.compare_view.viewport().installEventFilter(self)
 
         # Video container with player and timeline
         self.video_container = QWidget()
@@ -629,7 +650,9 @@ class ImageViewer(QMainWindow):
 
   ←/→         Navigate images
   0-5          Rate current image
+  X            Reject (toggle)
   ⌘0-5        Filter by rating
+  ⌘⌫          Move rejected to _rejected/
 
   S            Go to start
   E            Go to end
@@ -643,6 +666,7 @@ class ImageViewer(QMainWindow):
   H            Toggle this help
   T            Toggle shoot stats
 
+  C            Compare with pinned image
   O            Show in Finder
   ⌘L          Open all in Lightroom
   ⌘D          Export to DaVinci Resolve
@@ -808,7 +832,7 @@ class ImageViewer(QMainWindow):
         filter_layout.addSpacing(10)
 
         # Filter buttons
-        labels = ["All", "1+", "2+", "3+", "4+", "5"]
+        labels = ["All", "1+", "2+", "3+", "4+", "5", "✕"]
         for i, label in enumerate(labels):
             btn = QPushButton(label)
             btn.setCheckable(True)
@@ -928,32 +952,86 @@ class ImageViewer(QMainWindow):
             self._preload_nearby()
             self._preload_all_thumbnails()  # Restart from new position
 
-    def _on_preloaded(self, idx: int, pixmap: QPixmap):
+    def _on_preloaded(self, idx: int, path: Path, pixmap: QPixmap):
         with self.lock:
-            self.cache[idx] = pixmap
+            if pixmap:
+                cost = pixmap.width() * pixmap.height() * 4
+                self.cache.put(path, pixmap, cost)
             self.loading.discard(idx)
-        if idx == self.index and pixmap:
+        if pixmap and self.files and 0 <= self.index < len(self.files) and self.files[self.index] == path:
             self._display(pixmap)
         # Also create thumbnail
-        if pixmap and idx not in self.filmstrip.thumbnails:
+        if pixmap and idx < len(self.files) and self.files[idx] == path and idx not in self.filmstrip.thumbnails:
             thumb = pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
             self.filmstrip.set_thumbnail(idx, thumb)
 
     def _on_thumb_loaded(self, idx: int, pixmap: QPixmap):
         self.filmstrip.set_thumbnail(idx, pixmap)
         # Update rating in filmstrip
-        orig_idx = self.all_files.index(self.files[idx])
+        orig_idx = self.path_index.get(self.files[idx])
+        if orig_idx is None:
+            return
         rating = self.ratings.get(orig_idx, 0)
         self.filmstrip.set_rating(idx, rating)
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
-            if self.view_mode == "video":
-                return None  # Video mode uses player, not cached pixmaps
-            if self.view_mode == "jpeg":
-                return load_jpeg_preview(self.files[idx])
-            return extract_preview(self.files[idx])
+            return self._load_path_sync(self.files[idx])
         return None
+
+    def _load_path_sync(self, path: Path) -> Optional[QPixmap]:
+        if self.view_mode == "video":
+            return None  # Video mode uses player, not cached pixmaps
+        if self.view_mode == "jpeg":
+            return load_jpeg_preview(path)
+        return extract_preview(path)
+
+    def _toggle_compare(self):
+        """Pin current image left; navigation moves the right pane only."""
+        if self.view_mode == "video" or not self.files:
+            return
+        if self.compare_pinned is not None:
+            self._exit_compare()
+            return
+        path = self.files[self.index]
+        pixmap = self.cache.get(path) or self._load_sync(self.index)
+        if not pixmap:
+            return
+        self.compare_pinned = path
+        self.compare_view.set_pixmap(pixmap)
+        self.compare_view.setVisible(True)
+        half = max(1, self.image_splitter.width() // 2)
+        self.image_splitter.setSizes([half, half])
+        self.compare_focus = "right"
+        self._update_compare_borders()
+
+    def _exit_compare(self):
+        if self.compare_pinned is None:
+            return
+        self.compare_pinned = None
+        self.compare_view.setVisible(False)
+        self.compare_view.set_pixmap(QPixmap())
+        self._update_compare_borders()
+
+    def _update_compare_borders(self):
+        if self.compare_pinned is None:
+            self.compare_view.setStyleSheet("")
+            self.image_view.setStyleSheet("")
+            return
+        focused = "border: 2px solid #ffb400;"
+        unfocused = "border: 2px solid transparent;"
+        self.compare_view.setStyleSheet(focused if self.compare_focus == "left" else unfocused)
+        self.image_view.setStyleSheet(focused if self.compare_focus == "right" else unfocused)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.MouseButtonPress and self.compare_pinned is not None:
+            if obj is self.compare_view.viewport():
+                self.compare_focus = "left"
+                self._update_compare_borders()
+            elif obj is self.image_view.viewport():
+                self.compare_focus = "right"
+                self._update_compare_borders()
+        return super().eventFilter(obj, event)
 
     def _load_thumb_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
@@ -966,24 +1044,26 @@ class ImageViewer(QMainWindow):
             return extract_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
         return None
 
-    def _preload_one(self, idx: int):
+    def _preload_one(self, idx: int, path: Path):
         if self.view_mode == "video":
             return
-        pixmap = self._load_sync(idx)
+        pixmap = self._load_path_sync(path)
         if pixmap:
-            self.preload_signals.loaded.emit(idx, pixmap)
+            self.preload_signals.loaded.emit(idx, path, pixmap)
 
-    def _render_full(self, idx: int):
+    def _render_full(self, idx: int, path: Path):
         """Background full render for files with small embedded previews."""
-        pixmap = render_full_preview(self.files[idx])
+        pixmap = render_full_preview(path)
         if pixmap:
-            self.preload_signals.loaded.emit(idx, pixmap)
+            self.preload_signals.loaded.emit(idx, path, pixmap)
 
     def _preload_thumb(self, idx: int):
         success = False
         try:
             # Load rating too
-            orig_idx = self.all_files.index(self.files[idx])
+            orig_idx = self.path_index.get(self.files[idx])
+            if orig_idx is None:
+                return
             if orig_idx not in self.ratings:
                 rating = read_rating(self.files[idx])
                 self.ratings[orig_idx] = rating if rating is not None else 0
@@ -1028,10 +1108,9 @@ class ImageViewer(QMainWindow):
         for offset in [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6]:
             idx = self.index + offset
             with self.lock:
-                if 0 <= idx < len(self.files) and idx not in self.cache and idx not in self.loading:
+                if 0 <= idx < len(self.files) and self.files[idx] not in self.cache and idx not in self.loading:
                     self.loading.add(idx)
-                    self.executor.submit(self._preload_one, idx)
-        self._trim_cache()
+                    self.executor.submit(self._preload_one, idx, self.files[idx])
 
     def _preload_thumbnails(self):
         """Preload thumbnails around current index (for navigation)."""
@@ -1100,12 +1179,6 @@ class ImageViewer(QMainWindow):
             self.thumb_executor.submit(self._preload_thumb, idx)
             loaded += 1
 
-    def _trim_cache(self):
-        with self.lock:
-            to_remove = [k for k in self.cache.keys() if abs(k - self.index) > self.CACHE_SIZE // 2]
-            for k in to_remove:
-                del self.cache[k]
-
     def _load_current(self):
         if not self.files:
             return
@@ -1120,7 +1193,7 @@ class ImageViewer(QMainWindow):
             self.content_stack.setCurrentIndex(0)
             # Use cached full preview if available (instant)
             with self.lock:
-                cached = self.cache.get(self.index)
+                cached = self.cache.get(self.files[self.index])
             if cached:
                 self._display(cached)
             else:
@@ -1133,10 +1206,10 @@ class ImageViewer(QMainWindow):
                 with self.lock:
                     if idx not in self.loading:
                         self.loading.add(idx)
-                        self.current_executor.submit(self._preload_one, idx)
+                        self.current_executor.submit(self._preload_one, idx, self.files[idx])
 
         # Load rating (use original index)
-        orig_idx = self.all_files.index(self.files[self.index])
+        orig_idx = self.path_index[self.files[self.index]]
         if orig_idx not in self.ratings:
             rating = read_rating(self.files[self.index])
             self.ratings[orig_idx] = rating if rating is not None else 0
@@ -1165,6 +1238,8 @@ class ImageViewer(QMainWindow):
         position = f"{self.index + 1}/{len(self.files)}"
         if self.min_rating_filter > 0:
             position += f"  (≥{self.min_rating_filter}★)"
+        elif self.min_rating_filter == -1:
+            position += "  (✕)"
         self.pos_label.setText(position)
         self.pos_label.adjustSize()
         self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
@@ -1175,19 +1250,23 @@ class ImageViewer(QMainWindow):
         filename = current_file.name
         creation_time = get_creation_time(current_file)
         date_str = datetime.fromtimestamp(creation_time).strftime("%Y-%m-%d %H:%M")
-        orig_idx = self.all_files.index(current_file)
+        orig_idx = self.path_index[current_file]
         rating = self.ratings.get(orig_idx, 0)
-        stars = "★" * rating + "☆" * (5 - rating) if rating else "☆☆☆☆☆"
+        if rating == -1:
+            stars = "✕ rejected"
+        else:
+            stars = "★" * rating + "☆" * (5 - rating) if rating > 0 else "☆☆☆☆☆"
         self.info_label.setText(f"{filename}  |  {date_str}  |  {stars}")
         self.info_label.adjustSize()
         self.info_label.move(self.width() - self.info_label.width() - 10, 10 + self.pos_label.height())
         self.info_label.setVisible(self.show_info)
 
         # Filter label (shown when filter active)
-        if self.min_rating_filter > 0:
+        if self.min_rating_filter != 0:
             total_filtered = len(self.files)
             total_all = len(self.all_files)
-            self.filter_label.setText(f"Filter: ≥{self.min_rating_filter}★  ({total_filtered}/{total_all})")
+            filter_desc = "✕" if self.min_rating_filter == -1 else f"≥{self.min_rating_filter}★"
+            self.filter_label.setText(f"Filter: {filter_desc}  ({total_filtered}/{total_all})")
             self.filter_label.adjustSize()
             self.filter_label.move(10, 10)
             self.filter_label.setVisible(True)
@@ -1237,6 +1316,9 @@ class ImageViewer(QMainWindow):
 
         if min_rating == 0:
             self.files = self.all_files
+        elif min_rating == -1:
+            self._load_all_ratings()
+            self.files = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
         else:
             # Load all ratings first
             self._load_all_ratings()
@@ -1265,13 +1347,14 @@ class ImageViewer(QMainWindow):
         self._update_filter_buttons()
 
     def _on_filter_button(self, idx: int):
-        """Handle filter button click."""
-        self._apply_filter(idx)
+        """Handle filter button click. Button 6 = rejected-only bucket."""
+        self._apply_filter(-1 if idx == 6 else idx)
 
     def _update_filter_buttons(self):
         """Update filter button states."""
+        active_idx = 6 if self.min_rating_filter == -1 else self.min_rating_filter
         for i, btn in enumerate(self.filter_buttons):
-            btn.setChecked(i == self.min_rating_filter)
+            btn.setChecked(i == active_idx)
 
     def _open_folder(self):
         """Open folder picker and load new files."""
@@ -1308,8 +1391,8 @@ class ImageViewer(QMainWindow):
             files = scan_folder(folder, progress_callback=progress)
             jpeg_files = scan_folder_jpeg(folder)
             video_files = scan_folder_video(folder)
-            self._mode_state["jpeg"] = {"files": jpeg_files, "all_files": jpeg_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
-            self._mode_state["video"] = {"files": video_files, "all_files": video_files, "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+            self._mode_state["jpeg"] = {**self._empty_mode_state(), "files": jpeg_files, "all_files": jpeg_files}
+            self._mode_state["video"] = {**self._empty_mode_state(), "files": video_files, "all_files": video_files}
             self.preload_signals.folder_scanned.emit(files, folder)
 
         threading.Thread(target=scan, daemon=True).start()
@@ -1323,6 +1406,7 @@ class ImageViewer(QMainWindow):
 
     def _on_folder_scanned(self, files: list, folder: Path):
         """Handle folder scan completion."""
+        self._exit_compare()
         self.scanning_label.setVisible(False)
 
         jpeg_count = len(self._mode_state["jpeg"]["files"])
@@ -1340,6 +1424,15 @@ class ImageViewer(QMainWindow):
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
 
+        # Rescanning always installs RAW files into the active state below, so
+        # force back to raw mode if we were viewing JPEG/video.
+        if self.view_mode != "raw":
+            self.player.stop()
+            self.view_mode = "raw"
+            self.content_stack.setCurrentIndex(0)
+            self.title_label.setText("RAW Viewer")
+            self.title_label.adjustSize()
+
         # Clear state
         self.cache.clear()
         self.ratings.clear()
@@ -1351,6 +1444,7 @@ class ImageViewer(QMainWindow):
         # Load new files
         self.files = files
         self.all_files = files
+        self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
 
@@ -1405,6 +1499,7 @@ class ImageViewer(QMainWindow):
         has_any = self.files or any(s["files"] for s in self._mode_state.values())
         if not has_any:
             return
+        self._exit_compare()
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
@@ -1419,11 +1514,12 @@ class ImageViewer(QMainWindow):
         self.filmstrip.thumbnails.clear()
         self.files = []
         self.all_files = []
+        self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
         # Clear all mode states
         for mode in self._mode_state:
-            self._mode_state[mode] = {"files": [], "all_files": [], "index": 0, "cache": {}, "ratings": {}, "min_rating_filter": 0}
+            self._mode_state[mode] = self._empty_mode_state()
         # Persist shoot timer before clearing current folder
         self._persist_shoot_stats()
         self._shoot_session_start = None
@@ -1441,6 +1537,11 @@ class ImageViewer(QMainWindow):
         self._update_overlay()
         self._update_filter_buttons()
         self._update_empty_state()
+
+    def _empty_mode_state(self) -> dict:
+        return {"files": [], "all_files": [], "index": 0,
+                "cache": LruByteCache(self.CACHE_MAX_BYTES),
+                "ratings": {}, "min_rating_filter": 0}
 
     def _save_mode_state(self, mode: str):
         """Save current active state to the given mode's storage."""
@@ -1462,6 +1563,10 @@ class ImageViewer(QMainWindow):
         self.cache = state["cache"]
         self.ratings = state["ratings"]
         self.min_rating_filter = state["min_rating_filter"]
+        self._rebuild_path_index()
+
+    def _rebuild_path_index(self):
+        self.path_index = {f: i for i, f in enumerate(self.all_files)}
 
     def _on_mode_button(self, mode: str):
         """Handle mode switcher button click."""
@@ -1471,6 +1576,7 @@ class ImageViewer(QMainWindow):
         if not self._mode_state[mode]["files"]:
             self._update_mode_switcher()
             return
+        self._exit_compare()
         # Save current, switch directly without toggle-back behavior
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
@@ -1524,6 +1630,7 @@ class ImageViewer(QMainWindow):
         """Switch to target mode, or back to raw if already in it."""
         if not self._current_folder:
             return
+        self._exit_compare()
         # Don't switch to JPEG if no JPEGs available
         if self.view_mode == "raw" and target_mode == "jpeg" and not self._mode_state["jpeg"]["files"]:
             self._show_snackbar("No JPEG files found in this folder")
@@ -1910,6 +2017,15 @@ class ImageViewer(QMainWindow):
             elif event.modifiers() == Qt.KeyboardModifier.NoModifier:
                 # Number = rate
                 self._set_rating(num)
+        elif key == Qt.Key.Key_X and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if self.files:
+                if self.compare_pinned is not None and self.compare_focus == "left":
+                    target = self.compare_pinned
+                else:
+                    target = self.files[self.index]
+                orig_idx = self.path_index.get(target)
+                current = self.ratings.get(orig_idx, 0) if orig_idx is not None else 0
+                self._set_rating(0 if current == -1 else -1)
         elif key == Qt.Key.Key_I:
             self.show_info = not self.show_info
             self._update_overlay()
@@ -1939,7 +2055,7 @@ class ImageViewer(QMainWindow):
                 self._load_all_ratings()
                 # Find last rated image in current view
                 for i in range(len(self.files) - 1, -1, -1):
-                    orig_idx = self.all_files.index(self.files[i])
+                    orig_idx = self.path_index[self.files[i]]
                     if self.ratings.get(orig_idx, 0) > 0:
                         self.index = i
                         self._load_current()
@@ -1950,7 +2066,12 @@ class ImageViewer(QMainWindow):
             if self.files:
                 subprocess.run(['open', '-R', str(self.files[self.index])])
         elif key == Qt.Key.Key_Escape:
-            self._close_folder()
+            if self.compare_pinned is not None:
+                self._exit_compare()
+            else:
+                self._close_folder()
+        elif key == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            self._toggle_compare()
         elif key == Qt.Key.Key_S and (event.modifiers() == Qt.KeyboardModifier.ControlModifier or
                                        event.modifiers() == Qt.KeyboardModifier.MetaModifier):
             self._toggle_filmstrip()
@@ -1970,6 +2091,9 @@ class ImageViewer(QMainWindow):
             self._toggle_help()
         elif key == Qt.Key.Key_T:
             self._toggle_stats()
+        elif key == Qt.Key.Key_Backspace and event.modifiers() in (
+                Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
+            self._move_rejected()
         else:
             super().keyPressEvent(event)
 
@@ -1980,6 +2104,33 @@ class ImageViewer(QMainWindow):
             self._load_current()
             self._preload_nearby()
             self._preload_thumbnails()
+
+    def _move_rejected(self):
+        """Move all rejected files (+ sidecars/pairs) into _rejected/ and rescan."""
+        if not self._current_folder or not self.all_files:
+            return
+        self._load_all_ratings()
+        self.rating_executor.submit(lambda: None).result()  # flush pending sidecar writes
+        rejected = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
+        if not rejected:
+            self._show_snackbar("No rejected files")
+            return
+        move_set = collect_move_set(rejected)
+        extras = len(move_set) - len(rejected)
+        reply = QMessageBox.question(
+            self, "Move rejected",
+            f"Move {len(rejected)} rejected files (+{extras} sidecars/pairs) to {REJECTED_DIR_NAME}/?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        moved, error = move_to_rejected(move_set, self._current_folder)
+        if error:
+            self._show_snackbar(f"Moved {moved}, then failed at {error}", 5000)
+        else:
+            self._show_snackbar(f"Moved {moved} files to {REJECTED_DIR_NAME}/")
+        self._exit_compare()
+        self._load_folder(self._current_folder)
 
     def _on_scroll_navigate(self, delta: int):
         """Handle scroll-based navigation with debouncing."""
@@ -1995,23 +2146,31 @@ class ImageViewer(QMainWindow):
         if not self.files:
             return
 
-        orig_idx = self.all_files.index(self.files[self.index])
+        if self.compare_pinned is not None and self.compare_focus == "left":
+            orig_idx = self.path_index.get(self.compare_pinned)
+            if orig_idx is None:
+                return
+            self.ratings[orig_idx] = rating
+            self.rating_executor.submit(self._write_rating_task, self.compare_pinned, rating, self.view_mode)
+            if self.compare_pinned in self.files:
+                self.filmstrip.set_rating(self.files.index(self.compare_pinned), rating)
+            return  # pinned side never auto-advances
+
+        orig_idx = self.path_index[self.files[self.index]]
         prev_rating = self.ratings.get(orig_idx, 0)
         self.ratings[orig_idx] = rating
         current_file = self.files[self.index]
-        write_rating(current_file, rating)
-        if self.view_mode in ("jpeg", "video"):
-            set_green_tag(current_file, rating > 0)
+        self.rating_executor.submit(self._write_rating_task, current_file, rating, self.view_mode)
         self.filmstrip.set_rating(self.index, rating)
         self._update_overlay()
 
         # Track shoot selection progress
         if self._shoot_session_start is not None:
             changed = False
-            if prev_rating == 0 and rating > 0:
+            if prev_rating <= 0 and rating > 0:
                 self._shoot_rated_count += 1
                 changed = True
-            elif prev_rating > 0 and rating == 0:
+            elif prev_rating > 0 and rating <= 0:
                 self._shoot_rated_count = max(0, self._shoot_rated_count - 1)
                 changed = True
             if changed:
@@ -2021,6 +2180,14 @@ class ImageViewer(QMainWindow):
 
         if self.index < len(self.files) - 1:
             self._navigate(1)
+
+    def _write_rating_task(self, path: Path, rating: int, mode: str):
+        """Runs on rating_executor. Single worker keeps writes ordered per path."""
+        ok = write_rating(path, rating)
+        if mode in ("jpeg", "video"):
+            set_green_tag(path, rating > 0)
+        if not ok:
+            self.preload_signals.rating_write_failed.emit(path.name)
 
     def showEvent(self, event):
         """Configure transparent titlebar after window is shown."""
@@ -2080,6 +2247,7 @@ class ImageViewer(QMainWindow):
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
         self.player.stop()
+        self.rating_executor.shutdown(wait=True)
         self.executor.shutdown(wait=False)
         self.thumb_executor.shutdown(wait=False)
         super().closeEvent(event)

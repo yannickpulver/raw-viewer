@@ -8,6 +8,8 @@ from typing import List, Callable, Optional, Dict, Tuple
 
 import exifread
 
+from move_rejected import REJECTED_DIR_NAME
+
 # Date cache: path -> (mtime, timestamp)
 _date_cache: Dict[str, Tuple[float, float]] = {}
 _cache_file = Path.home() / ".cache" / "raw-viewer" / "dates.json"
@@ -113,7 +115,8 @@ def _scan_and_sort(
         raise ValueError(f"Not a directory: {folder}")
 
     matched = []
-    for root, _, files in os.walk(folder):
+    for root, dirs, files in os.walk(folder):
+        dirs[:] = [d for d in dirs if d != REJECTED_DIR_NAME]
         for f in files:
             path = Path(root) / f
             if file_predicate(path):
