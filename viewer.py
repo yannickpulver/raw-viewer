@@ -33,7 +33,7 @@ from move_rejected import collect_move_set, move_to_rejected, REJECTED_DIR_NAME
 
 class PreloadSignals(QObject):
     """Signals for background preloading."""
-    loaded = pyqtSignal(int, QPixmap)
+    loaded = pyqtSignal(int, object, QPixmap)  # idx, path, pixmap
     thumb_loaded = pyqtSignal(int, QPixmap)
     update_available = pyqtSignal(str, str)  # latest_version, download_url
     folder_scanned = pyqtSignal(list, Path)  # files, folder
@@ -952,16 +952,16 @@ class ImageViewer(QMainWindow):
             self._preload_nearby()
             self._preload_all_thumbnails()  # Restart from new position
 
-    def _on_preloaded(self, idx: int, pixmap: QPixmap):
+    def _on_preloaded(self, idx: int, path: Path, pixmap: QPixmap):
         with self.lock:
-            if 0 <= idx < len(self.files) and pixmap:
+            if pixmap:
                 cost = pixmap.width() * pixmap.height() * 4
-                self.cache.put(self.files[idx], pixmap, cost)
+                self.cache.put(path, pixmap, cost)
             self.loading.discard(idx)
-        if idx == self.index and pixmap:
+        if pixmap and self.files and 0 <= self.index < len(self.files) and self.files[self.index] == path:
             self._display(pixmap)
         # Also create thumbnail
-        if pixmap and idx not in self.filmstrip.thumbnails:
+        if pixmap and idx < len(self.files) and self.files[idx] == path and idx not in self.filmstrip.thumbnails:
             thumb = pixmap.scaled(80, 80, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.FastTransformation)
             self.filmstrip.set_thumbnail(idx, thumb)
 
@@ -976,12 +976,15 @@ class ImageViewer(QMainWindow):
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
-            if self.view_mode == "video":
-                return None  # Video mode uses player, not cached pixmaps
-            if self.view_mode == "jpeg":
-                return load_jpeg_preview(self.files[idx])
-            return extract_preview(self.files[idx])
+            return self._load_path_sync(self.files[idx])
         return None
+
+    def _load_path_sync(self, path: Path) -> Optional[QPixmap]:
+        if self.view_mode == "video":
+            return None  # Video mode uses player, not cached pixmaps
+        if self.view_mode == "jpeg":
+            return load_jpeg_preview(path)
+        return extract_preview(path)
 
     def _toggle_compare(self):
         """Pin current image left; navigation moves the right pane only."""
@@ -1041,18 +1044,18 @@ class ImageViewer(QMainWindow):
             return extract_thumbnail(self.files[idx], FilmstripWidget.THUMB_SIZE)
         return None
 
-    def _preload_one(self, idx: int):
+    def _preload_one(self, idx: int, path: Path):
         if self.view_mode == "video":
             return
-        pixmap = self._load_sync(idx)
+        pixmap = self._load_path_sync(path)
         if pixmap:
-            self.preload_signals.loaded.emit(idx, pixmap)
+            self.preload_signals.loaded.emit(idx, path, pixmap)
 
-    def _render_full(self, idx: int):
+    def _render_full(self, idx: int, path: Path):
         """Background full render for files with small embedded previews."""
-        pixmap = render_full_preview(self.files[idx])
+        pixmap = render_full_preview(path)
         if pixmap:
-            self.preload_signals.loaded.emit(idx, pixmap)
+            self.preload_signals.loaded.emit(idx, path, pixmap)
 
     def _preload_thumb(self, idx: int):
         success = False
@@ -1107,7 +1110,7 @@ class ImageViewer(QMainWindow):
             with self.lock:
                 if 0 <= idx < len(self.files) and self.files[idx] not in self.cache and idx not in self.loading:
                     self.loading.add(idx)
-                    self.executor.submit(self._preload_one, idx)
+                    self.executor.submit(self._preload_one, idx, self.files[idx])
 
     def _preload_thumbnails(self):
         """Preload thumbnails around current index (for navigation)."""
@@ -1203,7 +1206,7 @@ class ImageViewer(QMainWindow):
                 with self.lock:
                     if idx not in self.loading:
                         self.loading.add(idx)
-                        self.current_executor.submit(self._preload_one, idx)
+                        self.current_executor.submit(self._preload_one, idx, self.files[idx])
 
         # Load rating (use original index)
         orig_idx = self.path_index[self.files[self.index]]
@@ -1420,6 +1423,15 @@ class ImageViewer(QMainWindow):
         # Stop background preload
         if hasattr(self, '_bg_preload_timer'):
             self._bg_preload_timer.stop()
+
+        # Rescanning always installs RAW files into the active state below, so
+        # force back to raw mode if we were viewing JPEG/video.
+        if self.view_mode != "raw":
+            self.player.stop()
+            self.view_mode = "raw"
+            self.content_stack.setCurrentIndex(0)
+            self.title_label.setText("RAW Viewer")
+            self.title_label.adjustSize()
 
         # Clear state
         self.cache.clear()
@@ -2098,6 +2110,7 @@ class ImageViewer(QMainWindow):
         if not self._current_folder or not self.all_files:
             return
         self._load_all_ratings()
+        self.rating_executor.submit(lambda: None).result()  # flush pending sidecar writes
         rejected = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
         if not rejected:
             self._show_snackbar("No rejected files")
