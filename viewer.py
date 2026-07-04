@@ -12,7 +12,7 @@ import time
 
 from version import VERSION
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter, QMessageBox
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer, QUrl
 
@@ -28,6 +28,7 @@ from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
 from shoot_stats import load_stats, save_stats
+from move_rejected import collect_move_set, move_to_rejected, REJECTED_DIR_NAME
 
 
 class PreloadSignals(QObject):
@@ -651,6 +652,7 @@ class ImageViewer(QMainWindow):
   0-5          Rate current image
   X            Reject (toggle)
   ⌘0-5        Filter by rating
+  ⌘⌫          Move rejected to _rejected/
 
   S            Go to start
   E            Go to end
@@ -2077,6 +2079,9 @@ class ImageViewer(QMainWindow):
             self._toggle_help()
         elif key == Qt.Key.Key_T:
             self._toggle_stats()
+        elif key == Qt.Key.Key_Backspace and event.modifiers() in (
+                Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
+            self._move_rejected()
         else:
             super().keyPressEvent(event)
 
@@ -2087,6 +2092,32 @@ class ImageViewer(QMainWindow):
             self._load_current()
             self._preload_nearby()
             self._preload_thumbnails()
+
+    def _move_rejected(self):
+        """Move all rejected files (+ sidecars/pairs) into _rejected/ and rescan."""
+        if not self._current_folder or not self.all_files:
+            return
+        self._load_all_ratings()
+        rejected = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
+        if not rejected:
+            self._show_snackbar("No rejected files")
+            return
+        move_set = collect_move_set(rejected)
+        extras = len(move_set) - len(rejected)
+        reply = QMessageBox.question(
+            self, "Move rejected",
+            f"Move {len(rejected)} rejected files (+{extras} sidecars/pairs) to {REJECTED_DIR_NAME}/?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        moved, error = move_to_rejected(move_set, self._current_folder)
+        if error:
+            self._show_snackbar(f"Moved {moved}, then failed at {error}", 5000)
+        else:
+            self._show_snackbar(f"Moved {moved} files to {REJECTED_DIR_NAME}/")
+        self._exit_compare()
+        self._load_folder(self._current_folder)
 
     def _on_scroll_navigate(self, delta: int):
         """Handle scroll-based navigation with debouncing."""
