@@ -1462,6 +1462,9 @@ class ImageViewer(QMainWindow):
         self.filmstrip.thumbnails.clear()
         self.thumb_loading.clear()
         self.thumb_failed.clear()
+        self.grid.clear_thumbnails()
+        self.grid_thumb_loading.clear()
+        self.grid.set_total(len(self.files))
 
         # Preserve selection if still in filtered list, otherwise reset to 0
         if self.files:
@@ -1572,6 +1575,8 @@ class ImageViewer(QMainWindow):
         self.thumb_loading.clear()
         self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
+        self.grid.clear_thumbnails()
+        self.grid_thumb_loading.clear()
 
         # Load new files
         self.files = files
@@ -1608,6 +1613,12 @@ class ImageViewer(QMainWindow):
         self._preload_nearby()
         self._preload_all_thumbnails()
         self._update_overlay()
+        if self.display_mode == "grid":
+            self.grid.set_total(len(self.files))
+            if self.files:
+                self._enter_grid_mode()
+            else:
+                self._exit_grid_mode()
 
     def _update_empty_state(self):
         """Show/hide UI elements based on whether files are loaded."""
@@ -1615,7 +1626,7 @@ class ImageViewer(QMainWindow):
         # Show entire filter toolbar only when files loaded
         self.filter_buttons_widget.setVisible(has_files)
         # Show filmstrip only when files loaded and user hasn't hidden it
-        self.filmstrip.setVisible(has_files and self.filmstrip_visible)
+        self.filmstrip.setVisible(has_files and self.filmstrip_visible and self.display_mode != "grid")
         # Show centered button and recent folders only when no files
         self.open_btn_center.setVisible(not has_files)
         self.recent_container.setVisible(not has_files and len(self.recent_buttons) > 0)
@@ -1644,6 +1655,10 @@ class ImageViewer(QMainWindow):
         self.thumb_loading.clear()
         self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
+        self.grid.clear_thumbnails()
+        self.grid_thumb_loading.clear()
+        self.grid.set_total(0)
+        self.display_mode = "single"
         self.files = []
         self.all_files = []
         self._rebuild_path_index()
@@ -1721,6 +1736,9 @@ class ImageViewer(QMainWindow):
         self.thumb_loading.clear()
         self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
+        self.grid.clear_thumbnails()
+        self.grid_thumb_loading.clear()
+        self.grid.set_total(len(self.files))
         titles = {"raw": "RAW Viewer", "jpeg": "JPEG Viewer", "video": "Video Viewer"}
         self.title_label.setText(titles[self.view_mode])
         self.title_label.adjustSize()
@@ -1737,6 +1755,11 @@ class ImageViewer(QMainWindow):
                 self.image_view.set_pixmap(QPixmap())
         self._update_overlay()
         self._update_mode_switcher()
+        if self.display_mode == "grid":
+            if self.files:
+                self._enter_grid_mode()
+            else:
+                self._exit_grid_mode()
 
     def _update_mode_switcher(self):
         """Show/hide mode buttons based on available files; mark current as checked."""
@@ -1790,6 +1813,9 @@ class ImageViewer(QMainWindow):
         self.thumb_loading.clear()
         self.thumb_failed.clear()
         self.filmstrip.thumbnails.clear()
+        self.grid.clear_thumbnails()
+        self.grid_thumb_loading.clear()
+        self.grid.set_total(len(self.files))
 
         # Update title
         titles = {"raw": "RAW Viewer", "jpeg": "JPEG Viewer", "video": "Video Viewer"}
@@ -1812,6 +1838,11 @@ class ImageViewer(QMainWindow):
                 self.image_view.set_pixmap(QPixmap())
         self._update_overlay()
         self._update_mode_switcher()
+        if self.display_mode == "grid":
+            if self.files:
+                self._enter_grid_mode()
+            else:
+                self._exit_grid_mode()
 
     def _toggle_filmstrip(self):
         """Toggle filmstrip visibility."""
