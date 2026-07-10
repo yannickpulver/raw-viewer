@@ -676,6 +676,7 @@ class ImageViewer(QMainWindow):
   Space        Play/Pause video
   I            Toggle info overlay
   ⌘S          Toggle filmstrip
+  G            Toggle grid view
   H            Toggle this help
   T            Toggle shoot stats
 
@@ -1299,6 +1300,19 @@ class ImageViewer(QMainWindow):
 
     def _load_current(self):
         if not self.files:
+            return
+
+        if self.display_mode == "grid":
+            # Selection move only: no page switch, playback, or preview load
+            orig_idx = self.path_index[self.files[self.index]]
+            if orig_idx not in self.ratings:
+                rating = read_rating(self.files[self.index])
+                self.ratings[orig_idx] = rating if rating is not None else 0
+            self.filmstrip.set_current(self.index)
+            self.grid.set_current(self.index)
+            self.filmstrip.set_rating(self.index, self.ratings[orig_idx])
+            self.grid.set_rating(self.index, self.ratings[orig_idx])
+            self._update_overlay()
             return
 
         if self.view_mode == "video":
@@ -2119,8 +2133,34 @@ class ImageViewer(QMainWindow):
                     return
         event.ignore()
 
+    def _handle_grid_key(self, event: QKeyEvent) -> bool:
+        """Grid-mode key handling. Returns True when the event was consumed."""
+        key = event.key()
+        mods = event.modifiers()
+        if key == Qt.Key.Key_Right:
+            self._navigate(1)
+        elif key == Qt.Key.Key_Left:
+            self._navigate(-1)
+        elif key == Qt.Key.Key_Down:
+            self._navigate(move_vertical(self.index, self.grid.columns, len(self.files), 1) - self.index)
+        elif key == Qt.Key.Key_Up:
+            self._navigate(move_vertical(self.index, self.grid.columns, len(self.files), -1) - self.index)
+        elif key in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):
+            self._exit_grid_mode()
+        elif key in (Qt.Key.Key_Space, Qt.Key.Key_C) and mods == Qt.KeyboardModifier.NoModifier:
+            pass  # zoom and compare don't apply to the grid
+        elif key == Qt.Key.Key_S and mods in (Qt.KeyboardModifier.ControlModifier,
+                                              Qt.KeyboardModifier.MetaModifier):
+            pass  # filmstrip is hidden while in grid
+        else:
+            return False
+        return True
+
     def keyPressEvent(self, event: QKeyEvent):
         key = event.key()
+
+        if self.display_mode == "grid" and self._handle_grid_key(event):
+            return
 
         if key == Qt.Key.Key_Right:
             self._navigate(1)
@@ -2219,11 +2259,14 @@ class ImageViewer(QMainWindow):
 
     def _navigate(self, delta: int):
         new_index = self.index + delta
-        if 0 <= new_index < len(self.files):
-            self.index = new_index
-            self._load_current()
-            self._preload_nearby()
-            self._preload_thumbnails()
+        if not (0 <= new_index < len(self.files)):
+            return
+        self.index = new_index
+        self._load_current()
+        if self.display_mode == "grid":
+            return  # no full-preview loads while glancing in grid
+        self._preload_nearby()
+        self._preload_thumbnails()
 
     def _move_rejected(self):
         """Move all rejected files (+ sidecars/pairs) into _rejected/ and rescan."""
@@ -2282,6 +2325,7 @@ class ImageViewer(QMainWindow):
         current_file = self.files[self.index]
         self.rating_executor.submit(self._write_rating_task, current_file, rating, self.view_mode)
         self.filmstrip.set_rating(self.index, rating)
+        self.grid.set_rating(self.index, rating)
         self._update_overlay()
 
         # Track shoot selection progress
