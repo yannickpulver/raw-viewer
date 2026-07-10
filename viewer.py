@@ -1005,9 +1005,7 @@ class ImageViewer(QMainWindow):
     def _on_grid_click(self, index: int):
         if 0 <= index < len(self.files):
             self.index = index
-            self.grid.set_current(index)
-            self.filmstrip.set_current(index)
-            self._update_overlay()
+            self._load_current()
 
     def _on_grid_activate(self, index: int):
         if 0 <= index < len(self.files):
@@ -1041,6 +1039,10 @@ class ImageViewer(QMainWindow):
         buffer = 10
         start = max(0, first - buffer)
         end = min(len(self.files) - 1, last + buffer)
+        keep = 100  # evict far-offscreen thumbs to bound memory
+        for idx in list(self.grid.thumbnails):
+            if idx < start - keep or idx > end + keep:
+                del self.grid.thumbnails[idx]
         for idx in range(start, end + 1):
             with self.lock:
                 if idx in self.grid.thumbnails or idx in self.grid_thumb_loading:
