@@ -29,12 +29,14 @@ from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
 from shoot_stats import load_stats, save_stats
 from move_rejected import collect_move_set, move_to_rejected, REJECTED_DIR_NAME
+from grid_view import GridWidget, CELL as GRID_CELL, move_vertical
 
 
 class PreloadSignals(QObject):
     """Signals for background preloading."""
     loaded = pyqtSignal(int, object, QPixmap)  # idx, path, pixmap
     thumb_loaded = pyqtSignal(int, QPixmap)
+    grid_thumb_loaded = pyqtSignal(int, QPixmap)
     update_available = pyqtSignal(str, str)  # latest_version, download_url
     folder_scanned = pyqtSignal(list, Path)  # files, folder
     scan_progress = pyqtSignal(int, int)  # current, total
@@ -459,6 +461,7 @@ class ImageViewer(QMainWindow):
         self.preload_signals = PreloadSignals()
         self.preload_signals.loaded.connect(self._on_preloaded)
         self.preload_signals.thumb_loaded.connect(self._on_thumb_loaded)
+        self.preload_signals.grid_thumb_loaded.connect(self._on_grid_thumb_loaded)
         self.preload_signals.update_available.connect(self._on_update_available)
         self.preload_signals.folder_scanned.connect(self._on_folder_scanned)
         self.preload_signals.scan_progress.connect(self._on_scan_progress)
@@ -471,6 +474,7 @@ class ImageViewer(QMainWindow):
         self.rating_executor = ThreadPoolExecutor(max_workers=1)  # XMP sidecar writes
         self.loading: set = set()
         self.thumb_loading: set = set()
+        self.grid_thumb_loading: set = set()
         self.thumb_failed: set = set()  # Track failed thumbnails for progress
         self.lock = threading.Lock()
 
@@ -561,6 +565,15 @@ class ImageViewer(QMainWindow):
         self.filmstrip.clicked.connect(self._on_filmstrip_click)
         self.filmstrip.visible_range_changed.connect(self._on_visible_range_changed)
         layout.addWidget(self.filmstrip)
+
+        # Grid view (content_stack page index 2)
+        self.display_mode = "single"  # "single" or "grid"
+        self.grid = GridWidget()
+        self.grid.clicked.connect(self._on_grid_click)
+        self.grid.activated.connect(self._on_grid_activate)
+        self.grid.visible_range_changed.connect(self._on_grid_visible_range)
+        self.grid.set_fallback_thumbs(self.filmstrip.content.thumbnails)
+        self.content_stack.addWidget(self.grid)
 
         self.setCentralWidget(central)
 
@@ -952,6 +965,54 @@ class ImageViewer(QMainWindow):
             self._preload_nearby()
             self._preload_all_thumbnails()  # Restart from new position
 
+    def _toggle_grid(self):
+        if self.display_mode == "grid":
+            self._exit_grid_mode()
+        else:
+            self._enter_grid_mode()
+
+    def _enter_grid_mode(self):
+        if not self.files:
+            return
+        self._exit_compare()
+        if self.view_mode == "video":
+            self.player.pause()
+        self.display_mode = "grid"
+        self.grid.set_total(len(self.files))
+        for i, f in enumerate(self.files):
+            orig_idx = self.path_index.get(f)
+            if orig_idx is not None and orig_idx in self.ratings:
+                self.grid.set_rating(i, self.ratings[orig_idx])
+        self.filmstrip.setVisible(False)
+        self.content_stack.setCurrentIndex(2)
+        # Scroll after the grid has been laid out
+        QTimer.singleShot(0, lambda: self.grid.set_current(self.index))
+        self._update_overlay()
+
+    def _exit_grid_mode(self):
+        if self.display_mode != "grid":
+            return
+        self.display_mode = "single"
+        self.filmstrip.setVisible(bool(self.files) and self.filmstrip_visible)
+        if self.files:
+            self._load_current()
+            self._preload_nearby()
+            self._preload_thumbnails()
+        else:
+            self.content_stack.setCurrentIndex(1 if self.view_mode == "video" else 0)
+
+    def _on_grid_click(self, index: int):
+        if 0 <= index < len(self.files):
+            self.index = index
+            self.grid.set_current(index)
+            self.filmstrip.set_current(index)
+            self._update_overlay()
+
+    def _on_grid_activate(self, index: int):
+        if 0 <= index < len(self.files):
+            self.index = index
+            self._exit_grid_mode()
+
     def _on_preloaded(self, idx: int, path: Path, pixmap: QPixmap):
         with self.lock:
             if pixmap:
@@ -973,6 +1034,63 @@ class ImageViewer(QMainWindow):
             return
         rating = self.ratings.get(orig_idx, 0)
         self.filmstrip.set_rating(idx, rating)
+
+    def _on_grid_visible_range(self, first: int, last: int):
+        """Load 200px grid thumbnails for visible range + buffer."""
+        buffer = 10
+        start = max(0, first - buffer)
+        end = min(len(self.files) - 1, last + buffer)
+        for idx in range(start, end + 1):
+            with self.lock:
+                if idx in self.grid.thumbnails or idx in self.grid_thumb_loading:
+                    continue
+                self.grid_thumb_loading.add(idx)
+            self.thumb_executor.submit(self._preload_grid_thumb, idx)
+
+    def _preload_grid_thumb(self, idx: int):
+        try:
+            if not (0 <= idx < len(self.files)):
+                return
+            path = self.files[idx]
+            orig_idx = self.path_index.get(path)
+            if orig_idx is None:
+                return
+            if orig_idx not in self.ratings:
+                rating = read_rating(path)
+                self.ratings[orig_idx] = rating if rating is not None else 0
+
+            size = GRID_CELL
+            thumb_bytes = self.thumb_cache.get(path, size)
+            if not thumb_bytes:
+                if self.view_mode == "video":
+                    from preview import load_video_thumbnail_bytes
+                    thumb_bytes = load_video_thumbnail_bytes(path, size)
+                elif self.view_mode == "jpeg":
+                    thumb_bytes = load_jpeg_thumbnail_bytes(path, size)
+                else:
+                    thumb_bytes = extract_thumbnail_bytes(path, size)
+                if thumb_bytes:
+                    self.thumb_cache.set(path, size, thumb_bytes)
+            if thumb_bytes:
+                pixmap = _pixmap_from_jpeg_srgb(thumb_bytes)
+                if pixmap is not None:
+                    self.preload_signals.grid_thumb_loaded.emit(idx, pixmap)
+        except Exception:
+            pass
+        finally:
+            with self.lock:
+                self.grid_thumb_loading.discard(idx)
+
+    def _on_grid_thumb_loaded(self, idx: int, pixmap: QPixmap):
+        if pixmap.width() > GRID_CELL or pixmap.height() > GRID_CELL:
+            pixmap = pixmap.scaled(GRID_CELL, GRID_CELL,
+                                   Qt.AspectRatioMode.KeepAspectRatio,
+                                   Qt.TransformationMode.SmoothTransformation)
+        self.grid.set_thumbnail(idx, pixmap)
+        if 0 <= idx < len(self.files):
+            orig_idx = self.path_index.get(self.files[idx])
+            if orig_idx is not None:
+                self.grid.set_rating(idx, self.ratings.get(orig_idx, 0))
 
     def _load_sync(self, idx: int) -> Optional[QPixmap]:
         if 0 <= idx < len(self.files):
@@ -2094,6 +2212,8 @@ class ImageViewer(QMainWindow):
         elif key == Qt.Key.Key_Backspace and event.modifiers() in (
                 Qt.KeyboardModifier.ControlModifier, Qt.KeyboardModifier.MetaModifier):
             self._move_rejected()
+        elif key == Qt.Key.Key_G and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            self._toggle_grid()
         else:
             super().keyPressEvent(event)
 
