@@ -14,6 +14,11 @@ def columns_for_width(width: int, cell: int = CELL, spacing: int = SPACING) -> i
     return max(1, (width - spacing) // (cell + spacing))
 
 
+def cell_size_for_width(width: int, columns: int, cell: int = CELL, spacing: int = SPACING) -> int:
+    """Stretch cells to fill the width; never smaller than the base cell."""
+    return max(cell, (width - (columns + 1) * spacing) // columns)
+
+
 def cell_origin(index: int, columns: int, cell: int = CELL, spacing: int = SPACING) -> Tuple[int, int]:
     row, col = divmod(index, columns)
     return spacing + col * (cell + spacing), spacing + row * (cell + spacing)
@@ -75,6 +80,7 @@ class GridContent(QWidget):
         self.current_index = 0
         self.total_count = 0
         self.columns = 1
+        self.cell = CELL
         self.ratings: Dict[int, int] = {}
         self.setStyleSheet("background-color: transparent;")
         self.setAcceptDrops(True)
@@ -98,7 +104,7 @@ class GridContent(QWidget):
         if self.total_count == 0:
             return
         new_range = visible_index_range(viewport_rect.top(), viewport_rect.bottom(),
-                                        self.columns, self.total_count)
+                                        self.columns, self.total_count, self.cell)
         if new_range != self._last_visible_range:
             self._last_visible_range = new_range
             self.visible_range_changed.emit(*new_range)
@@ -111,6 +117,12 @@ class GridContent(QWidget):
     def set_columns(self, columns: int):
         if columns != self.columns:
             self.columns = columns
+            self._last_visible_range = (-1, -1)
+            self.update()
+
+    def set_cell(self, cell: int):
+        if cell != self.cell:
+            self.cell = cell
             self._last_visible_range = (-1, -1)
             self.update()
 
@@ -133,58 +145,57 @@ class GridContent(QWidget):
             painter.end()
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        cell = self.cell
         rect = event.rect()
         first, last = visible_index_range(rect.top(), rect.bottom(),
-                                          self.columns, self.total_count)
+                                          self.columns, self.total_count, cell)
         for idx in range(first, last + 1):
-            x, y = cell_origin(idx, self.columns)
+            x, y = cell_origin(idx, self.columns, cell)
 
-            thumb = self.thumbnails.get(idx)
-            if thumb is not None:
-                tx = x + (CELL - thumb.width()) // 2
-                ty = y + (CELL - thumb.height()) // 2
-                painter.drawPixmap(tx, ty, thumb)
+            thumb = self.thumbnails.get(idx) or self.fallback_thumbs.get(idx)
+            if thumb is not None and thumb.width() > 0 and thumb.height() > 0:
+                if idx not in self.thumbnails:
+                    painter.fillRect(x, y, cell, cell, QColor(40, 40, 40))
+                scale = min(cell / thumb.width(), cell / thumb.height())
+                tw = int(thumb.width() * scale)
+                th = int(thumb.height() * scale)
+                target = QRect(x + (cell - tw) // 2, y + (cell - th) // 2, tw, th)
+                painter.drawPixmap(target, thumb)
             else:
-                painter.fillRect(x, y, CELL, CELL, QColor(40, 40, 40))
-                fallback = self.fallback_thumbs.get(idx)
-                if fallback is not None and fallback.width() > 0 and fallback.height() > 0:
-                    scale = min(CELL / fallback.width(), CELL / fallback.height())
-                    tw = int(fallback.width() * scale)
-                    th = int(fallback.height() * scale)
-                    target = QRect(x + (CELL - tw) // 2, y + (CELL - th) // 2, tw, th)
-                    painter.drawPixmap(target, fallback)
+                painter.fillRect(x, y, cell, cell, QColor(40, 40, 40))
 
             if idx == self.current_index:
                 painter.setPen(QPen(QColor(255, 255, 255), 3))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRect(x - 2, y - 2, CELL + 4, CELL + 4)
+                painter.drawRect(x - 2, y - 2, cell + 4, cell + 4)
 
             rating = self.ratings.get(idx, 0)
             if rating > 0:
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.setBrush(QColor(255, 200, 50))
-                dot_start_x = x + (CELL - rating * 10) // 2
+                dot_start_x = x + (cell - rating * 10) // 2
                 for r in range(rating):
-                    painter.drawEllipse(dot_start_x + r * 10, y + CELL - 14, 6, 6)
+                    painter.drawEllipse(dot_start_x + r * 10, y + cell - 14, 6, 6)
             elif rating == -1:
                 painter.setPen(QPen(QColor(230, 70, 70), 2))
                 font = painter.font()
                 font.setPixelSize(16)
                 font.setBold(True)
                 painter.setFont(font)
-                painter.drawText(x, y + CELL - 26, CELL, 20,
+                painter.drawText(x, y + cell - 26, cell, 20,
                                  Qt.AlignmentFlag.AlignCenter, "✕")
         painter.end()
 
     def mousePressEvent(self, event):
         idx = index_at(event.position().x(), event.position().y(),
-                       self.columns, self.total_count)
+                       self.columns, self.total_count, self.cell)
         if idx >= 0:
             self.clicked.emit(idx)
 
     def mouseDoubleClickEvent(self, event):
         idx = index_at(event.position().x(), event.position().y(),
-                       self.columns, self.total_count)
+                       self.columns, self.total_count, self.cell)
         if idx >= 0:
             self.activated.emit(idx)
 
@@ -242,9 +253,12 @@ class GridWidget(QScrollArea):
 
     def _relayout(self):
         w = max(1, self.viewport().width())
-        self.content.set_columns(columns_for_width(w))
-        h = content_height(self.content.total_count, self.content.columns)
-        self.content.setFixedSize(w, max(h, 1))
+        columns = columns_for_width(w)
+        cell = cell_size_for_width(w, columns)
+        self.content.set_columns(columns)
+        self.content.set_cell(cell)
+        h = content_height(self.content.total_count, columns, cell)
+        self.content.setFixedSize(max(w, cell + 2 * SPACING), max(h, 1))
         self._scroll_timer.start(50)
 
     def showEvent(self, event):
@@ -274,8 +288,9 @@ class GridWidget(QScrollArea):
     def set_current(self, index: int):
         self.content.set_current(index)
         if index >= 0 and self.content.columns > 0:
-            x, y = cell_origin(index, self.content.columns)
-            self.ensureVisible(x + CELL // 2, y + CELL // 2, CELL // 2, CELL // 2 + SPACING)
+            cell = self.content.cell
+            x, y = cell_origin(index, self.content.columns, cell)
+            self.ensureVisible(x + cell // 2, y + cell // 2, cell // 2, cell // 2 + SPACING)
 
     def set_rating(self, index: int, rating: int):
         self.content.set_rating(index, rating)

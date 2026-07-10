@@ -4,6 +4,7 @@ from grid_view import (
     CELL,
     SPACING,
     cell_origin,
+    cell_size_for_width,
     columns_for_width,
     content_height,
     index_at,
@@ -19,6 +20,16 @@ def test_columns_for_width():
     assert columns_for_width(SPACING + 4 * STRIDE) == 4
     assert columns_for_width(100) == 1  # never below 1
     assert columns_for_width(0) == 1
+
+
+def test_cell_size_for_width():
+    # exact fit: cells stay at base size
+    assert cell_size_for_width(SPACING + 4 * STRIDE, 4) == CELL
+    # leftover width stretches the cells
+    assert cell_size_for_width(1000, 4) == (1000 - 5 * SPACING) // 4
+    # narrower than one cell: never below base size
+    assert cell_size_for_width(150, 1) == CELL
+    assert cell_size_for_width(0, 1) == CELL
 
 
 def test_cell_origin():
