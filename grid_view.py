@@ -59,3 +59,243 @@ def move_vertical(index: int, columns: int, total: int, delta_rows: int) -> int:
             return index
         return min(target, total - 1)
     return index if target < 0 else target
+
+
+class GridContent(QWidget):
+    """Inner content widget: draws only the visible rows of thumbnails."""
+
+    clicked = pyqtSignal(int)
+    activated = pyqtSignal(int)
+    visible_range_changed = pyqtSignal(int, int)  # first, last visible index
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.thumbnails: Dict[int, QPixmap] = {}
+        self.fallback_thumbs: Dict[int, QPixmap] = {}
+        self.current_index = 0
+        self.total_count = 0
+        self.columns = 1
+        self.ratings: Dict[int, int] = {}
+        self.setStyleSheet("background-color: transparent;")
+        self.setAcceptDrops(True)
+        self._dirty = False
+        self._update_timer = QTimer()
+        self._update_timer.setSingleShot(True)
+        self._update_timer.timeout.connect(self._do_update)
+        self._last_visible_range = (-1, -1)
+
+    def _schedule_update(self):
+        self._dirty = True
+        if not self._update_timer.isActive():
+            self._update_timer.start(50)  # Batch updates every 50ms
+
+    def _do_update(self):
+        if self._dirty:
+            self._dirty = False
+            self.update()
+
+    def update_visible_range(self, viewport_rect):
+        if self.total_count == 0:
+            return
+        new_range = visible_index_range(viewport_rect.top(), viewport_rect.bottom(),
+                                        self.columns, self.total_count)
+        if new_range != self._last_visible_range:
+            self._last_visible_range = new_range
+            self.visible_range_changed.emit(*new_range)
+
+    def set_total(self, count: int):
+        self.total_count = count
+        self._last_visible_range = (-1, -1)
+        self.update()
+
+    def set_columns(self, columns: int):
+        if columns != self.columns:
+            self.columns = columns
+            self._last_visible_range = (-1, -1)
+            self.update()
+
+    def set_thumbnail(self, index: int, pixmap: QPixmap):
+        self.thumbnails[index] = pixmap
+        self._schedule_update()
+
+    def set_current(self, index: int):
+        self.current_index = index
+        self.update()  # Immediate for navigation
+
+    def set_rating(self, index: int, rating: int):
+        self.ratings[index] = rating
+        self._schedule_update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(event.rect(), QColor(20, 20, 20))
+        if self.total_count == 0:
+            painter.end()
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        rect = event.rect()
+        first, last = visible_index_range(rect.top(), rect.bottom(),
+                                          self.columns, self.total_count)
+        for idx in range(first, last + 1):
+            x, y = cell_origin(idx, self.columns)
+
+            thumb = self.thumbnails.get(idx)
+            if thumb is not None:
+                tx = x + (CELL - thumb.width()) // 2
+                ty = y + (CELL - thumb.height()) // 2
+                painter.drawPixmap(tx, ty, thumb)
+            else:
+                painter.fillRect(x, y, CELL, CELL, QColor(40, 40, 40))
+                fallback = self.fallback_thumbs.get(idx)
+                if fallback is not None and fallback.width() > 0 and fallback.height() > 0:
+                    scale = min(CELL / fallback.width(), CELL / fallback.height())
+                    tw = int(fallback.width() * scale)
+                    th = int(fallback.height() * scale)
+                    target = QRect(x + (CELL - tw) // 2, y + (CELL - th) // 2, tw, th)
+                    painter.drawPixmap(target, fallback)
+
+            if idx == self.current_index:
+                painter.setPen(QPen(QColor(255, 255, 255), 3))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(x - 2, y - 2, CELL + 4, CELL + 4)
+
+            rating = self.ratings.get(idx, 0)
+            if rating > 0:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor(255, 200, 50))
+                dot_start_x = x + (CELL - rating * 10) // 2
+                for r in range(rating):
+                    painter.drawEllipse(dot_start_x + r * 10, y + CELL - 14, 6, 6)
+            elif rating == -1:
+                painter.setPen(QPen(QColor(230, 70, 70), 2))
+                font = painter.font()
+                font.setPixelSize(16)
+                font.setBold(True)
+                painter.setFont(font)
+                painter.drawText(x, y + CELL - 26, CELL, 20,
+                                 Qt.AlignmentFlag.AlignCenter, "✕")
+        painter.end()
+
+    def mousePressEvent(self, event):
+        idx = index_at(event.position().x(), event.position().y(),
+                       self.columns, self.total_count)
+        if idx >= 0:
+            self.clicked.emit(idx)
+
+    def mouseDoubleClickEvent(self, event):
+        idx = index_at(event.position().x(), event.position().y(),
+                       self.columns, self.total_count)
+        if idx >= 0:
+            self.activated.emit(idx)
+
+    def dragEnterEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        """Forward to main window."""
+        self.window().dropEvent(event)
+
+
+class GridWidget(QScrollArea):
+    """Vertical scrollable grid of thumbnails."""
+
+    clicked = pyqtSignal(int)
+    activated = pyqtSignal(int)
+    visible_range_changed = pyqtSignal(int, int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.content = GridContent()
+        self.content.clicked.connect(self.clicked.emit)
+        self.content.activated.connect(self.activated.emit)
+        self.content.visible_range_changed.connect(self.visible_range_changed.emit)
+
+        self.setWidget(self.content)
+        self.setWidgetResizable(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.content.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setAcceptDrops(True)
+        self.setStyleSheet("""
+            QScrollArea { background-color: rgb(20, 20, 20); border: none; }
+            QScrollBar:vertical { width: 6px; background: #222; }
+            QScrollBar::handle:vertical { background: #666; border-radius: 3px; min-height: 30px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+
+        # Debounced scroll -> visible range emission (same pattern as FilmstripWidget)
+        self._scroll_timer = QTimer()
+        self._scroll_timer.setSingleShot(True)
+        self._scroll_timer.timeout.connect(self._emit_visible_range)
+        self.verticalScrollBar().valueChanged.connect(lambda: self._scroll_timer.start(50))
+
+    def _emit_visible_range(self):
+        rect = self.viewport().rect()
+        rect.moveTop(self.verticalScrollBar().value())
+        self.content.update_visible_range(rect)
+
+    def _relayout(self):
+        w = max(1, self.viewport().width())
+        self.content.set_columns(columns_for_width(w))
+        h = content_height(self.content.total_count, self.content.columns)
+        self.content.setFixedSize(w, max(h, 1))
+        self._scroll_timer.start(50)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._relayout()
+        QTimer.singleShot(0, self._emit_visible_range)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._relayout()
+
+    @property
+    def thumbnails(self):
+        return self.content.thumbnails
+
+    @property
+    def columns(self):
+        return self.content.columns
+
+    def set_total(self, count: int):
+        self.content.set_total(count)
+        self._relayout()
+
+    def set_thumbnail(self, index: int, pixmap: QPixmap):
+        self.content.set_thumbnail(index, pixmap)
+
+    def set_current(self, index: int):
+        self.content.set_current(index)
+        if index >= 0 and self.content.columns > 0:
+            x, y = cell_origin(index, self.content.columns)
+            self.ensureVisible(x + CELL // 2, y + CELL // 2, CELL // 2, CELL // 2 + SPACING)
+
+    def set_rating(self, index: int, rating: int):
+        self.content.set_rating(index, rating)
+
+    def set_fallback_thumbs(self, thumbs: Dict[int, QPixmap]):
+        self.content.fallback_thumbs = thumbs
+
+    def clear_thumbnails(self):
+        self.content.thumbnails.clear()
+        self.content.ratings.clear()
+        self.content._last_visible_range = (-1, -1)
+
+    def dragEnterEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        """Forward to main window."""
+        self.window().dragEnterEvent(event)
+
+    def dropEvent(self, event):
+        """Forward to main window."""
+        self.window().dropEvent(event)
