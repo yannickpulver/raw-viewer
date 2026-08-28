@@ -361,9 +361,11 @@ class FilmstripWidget(QScrollArea):
         self.content.setAcceptDrops(True)
         self.setStyleSheet("""
             QScrollArea { background-color: rgba(0, 0, 0, 200); border: none; }
-            QScrollBar:horizontal { height: 6px; background: #222; }
-            QScrollBar::handle:horizontal { background: #666; border-radius: 3px; min-width: 30px; }
+            QScrollBar:horizontal { height: 18px; background: transparent; margin: 0 8px 8px 8px; }
+            QScrollBar::handle:horizontal { background: #777; border-radius: 5px; min-width: 40px; }
+            QScrollBar::handle:horizontal:hover { background: #999; }
             QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: #222; border-radius: 5px; }
         """)
 
         # Track scroll to update visible range (debounced)
