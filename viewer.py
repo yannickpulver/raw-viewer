@@ -23,7 +23,7 @@ from preview import extract_preview, extract_thumbnail, extract_thumbnail_bytes,
 from pixmap_cache import LruByteCache
 from rating import read_rating, write_rating, set_green_tag
 from resolve_export import export_to_resolve, is_resolve_installed
-from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time
+from scanner import scan_folder, scan_folder_jpeg, scan_folder_video, get_creation_time, subfolder_counts, subfolder_name
 from datetime import datetime
 from thumbnail_cache import ThumbnailCache
 from recent_folders import load_recent_folders, add_recent_folder
@@ -452,6 +452,7 @@ class ImageViewer(QMainWindow):
         self.show_info = True
         self.filmstrip_visible = True
         self.min_rating_filter = 0  # 0 = show all
+        self.folder_filter: Optional[str] = None  # None = all subfolders
 
         # View mode: "raw", "jpeg", or "video"
         self.view_mode: str = "raw"
@@ -876,6 +877,15 @@ class ImageViewer(QMainWindow):
             self.mode_buttons[mode] = btn
         self.mode_switcher.adjustSize()
         self.mode_switcher.setVisible(False)
+
+        # Subfolder filter chips (below mode switcher)
+        self.subfolder_chip_style = button_style
+        self.subfolder_chips = QWidget(self)
+        self.subfolder_chips.setStyleSheet("background: transparent;")
+        chips_layout = QHBoxLayout(self.subfolder_chips)
+        chips_layout.setContentsMargins(0, 0, 0, 0)
+        chips_layout.setSpacing(4)
+        self.subfolder_chips.setVisible(False)
 
         # Help button (standalone, bottom-left, always visible)
         self.help_btn = QPushButton("?", self)
@@ -1376,6 +1386,8 @@ class ImageViewer(QMainWindow):
             position += f"  (≥{self.min_rating_filter}★)"
         elif self.min_rating_filter == -1:
             position += "  (✕)"
+        if self.folder_filter is not None:
+            position += f"  [{self.folder_filter}]"
         self.pos_label.setText(position)
         self.pos_label.adjustSize()
         self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
@@ -1449,17 +1461,7 @@ class ImageViewer(QMainWindow):
         current_file = self.files[self.index] if self.files and 0 <= self.index < len(self.files) else None
 
         self.min_rating_filter = min_rating
-
-        if min_rating == 0:
-            self.files = self.all_files
-        elif min_rating == -1:
-            self._load_all_ratings()
-            self.files = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) == -1]
-        else:
-            # Load all ratings first
-            self._load_all_ratings()
-            # Filter files
-            self.files = [f for i, f in enumerate(self.all_files) if self.ratings.get(i, 0) >= min_rating]
+        self.files = self._filtered_files()
 
         # Update filmstrip
         self.filmstrip.set_total(len(self.files))
@@ -1484,6 +1486,23 @@ class ImageViewer(QMainWindow):
 
         self._update_overlay()
         self._update_filter_buttons()
+
+    def _matches_rating_filter(self, orig_idx: int) -> bool:
+        rating = self.ratings.get(orig_idx, 0)
+        if self.min_rating_filter == -1:
+            return rating == -1
+        return rating >= self.min_rating_filter
+
+    def _filtered_files(self) -> List[Path]:
+        """all_files narrowed by the active rating and subfolder filters."""
+        if self.min_rating_filter != 0:
+            self._load_all_ratings()
+        root = self._current_folder
+        return [
+            f for i, f in enumerate(self.all_files)
+            if self._matches_rating_filter(i)
+            and (self.folder_filter is None or root is None or subfolder_name(f, root) == self.folder_filter)
+        ]
 
     def _on_filter_button(self, idx: int):
         """Handle filter button click. Button 6 = rejected-only bucket."""
@@ -1588,6 +1607,7 @@ class ImageViewer(QMainWindow):
         self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
+        self.folder_filter = None
 
         # Resume (or start) shoot selection timer for this folder
         prior = load_stats(str(folder))
@@ -1668,6 +1688,7 @@ class ImageViewer(QMainWindow):
         self._rebuild_path_index()
         self.index = 0
         self.min_rating_filter = 0
+        self.folder_filter = None
         # Clear all mode states
         for mode in self._mode_state:
             self._mode_state[mode] = self._empty_mode_state()
@@ -1692,7 +1713,7 @@ class ImageViewer(QMainWindow):
     def _empty_mode_state(self) -> dict:
         return {"files": [], "all_files": [], "index": 0,
                 "cache": LruByteCache(self.CACHE_MAX_BYTES),
-                "ratings": {}, "min_rating_filter": 0}
+                "ratings": {}, "min_rating_filter": 0, "folder_filter": None}
 
     def _save_mode_state(self, mode: str):
         """Save current active state to the given mode's storage."""
@@ -1703,6 +1724,7 @@ class ImageViewer(QMainWindow):
             "cache": self.cache,
             "ratings": self.ratings,
             "min_rating_filter": self.min_rating_filter,
+            "folder_filter": self.folder_filter,
         }
 
     def _load_mode_state(self, mode: str):
@@ -1714,6 +1736,7 @@ class ImageViewer(QMainWindow):
         self.cache = state["cache"]
         self.ratings = state["ratings"]
         self.min_rating_filter = state["min_rating_filter"]
+        self.folder_filter = state["folder_filter"]
         self._rebuild_path_index()
 
     def _rebuild_path_index(self):
@@ -1784,6 +1807,38 @@ class ImageViewer(QMainWindow):
         self.mode_switcher.setVisible(any_visible)
         self.mode_switcher.move(80, 8)
         self.mode_switcher.raise_()
+        self._update_subfolder_chips()
+
+    def _update_subfolder_chips(self):
+        """Rebuild subfolder chips for the loaded files; hidden unless files span multiple folders."""
+        layout = self.subfolder_chips.layout()
+        while layout.count():
+            stale = layout.takeAt(0).widget()
+            stale.setParent(None)
+            stale.deleteLater()
+        counts = subfolder_counts(self.all_files, self._current_folder) if self._current_folder else []
+        chips = [(None, f"All ({len(self.all_files)})")] + [(name, f"{name} ({count})") for name, count in counts]
+        for folder, text in chips:
+            chip = QPushButton(text)
+            chip.setCheckable(True)
+            chip.setChecked(folder == self.folder_filter)
+            chip.setStyleSheet(self.subfolder_chip_style)
+            chip.clicked.connect(lambda checked, f=folder: self._set_folder_filter(f))
+            layout.addWidget(chip)
+            chip.show()
+        self.subfolder_chips.adjustSize()
+        self._position_subfolder_chips()
+        self.subfolder_chips.setVisible(len(counts) > 1 and not self.mode_switcher.isHidden())
+        self.subfolder_chips.raise_()
+
+    def _position_subfolder_chips(self):
+        self.subfolder_chips.move(80, 8 + self.mode_switcher.height() + 4)
+
+    def _set_folder_filter(self, folder: Optional[str]):
+        """Filter to one first-level subfolder (None = all), keeping the rating filter."""
+        self.folder_filter = folder
+        self._apply_filter(self.min_rating_filter)
+        self._update_subfolder_chips()
 
     def _switch_view_mode(self, target_mode: str):
         """Switch to target mode, or back to raw if already in it."""
@@ -2094,6 +2149,7 @@ class ImageViewer(QMainWindow):
         self.stats_btn.move(10 + self.help_btn.width() + 6, btn_y)
         # Position mode switcher top-left
         self.mode_switcher.move(80, 8)
+        self._position_subfolder_chips()
         # Center open button if visible
         if self.open_btn_center.isVisible():
             self._center_open_button()

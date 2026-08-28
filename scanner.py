@@ -1,10 +1,13 @@
 """Scan directories for RAW files, sorted by creation date."""
 
+import io
 import json
 import os
+import struct
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import List, Callable, Optional, Dict, Tuple
+from typing import BinaryIO, Iterator, List, Callable, Optional, Dict, Tuple
 
 import exifread
 
@@ -12,7 +15,7 @@ from move_rejected import REJECTED_DIR_NAME
 
 # Date cache: path -> (mtime, timestamp)
 _date_cache: Dict[str, Tuple[float, float]] = {}
-_cache_file = Path.home() / ".cache" / "raw-viewer" / "dates.json"
+_cache_file = Path.home() / ".cache" / "raw-viewer" / "dates_v2.json"
 
 
 def _load_date_cache():
@@ -69,6 +72,102 @@ def is_video_file(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_EXTENSIONS
 
 
+RAF_MAGIC = b'FUJIFILMCCD-RAW '
+CR3_CANON_UUID = bytes.fromhex('85c0b687820f11e08111f4ce462b6a48')
+_DATE_KEYS = ('EXIF DateTimeOriginal', 'Image DateTimeOriginal')
+
+
+def _iter_boxes(f: BinaryIO, start: int, end: int) -> Iterator[Tuple[int, int, bytes]]:
+    """Yield (payload_offset, payload_end, type) for ISO-BMFF boxes in [start, end)."""
+    pos = start
+    while pos + 8 <= end:
+        f.seek(pos)
+        size, box_type = struct.unpack('>I4s', f.read(8))
+        header = 8
+        if size == 1:
+            size = struct.unpack('>Q', f.read(8))[0]
+            header = 16
+        elif size == 0:
+            size = end - pos
+        if size < header:
+            return
+        yield pos + header, pos + size, box_type
+        pos += size
+
+
+def _find_box(f: BinaryIO, start: int, end: int, wanted: bytes) -> Optional[Tuple[int, int]]:
+    for payload, box_end, box_type in _iter_boxes(f, start, end):
+        if box_type == wanted:
+            return payload, box_end
+    return None
+
+
+def _raf_exif_blob(f: BinaryIO) -> Optional[bytes]:
+    """RAF header stores embedded JPEG offset/length at bytes 84-92 (big-endian)."""
+    f.seek(0)
+    if f.read(16) != RAF_MAGIC:
+        return None
+    f.seek(84)
+    jpeg_offset, jpeg_length = struct.unpack('>II', f.read(8))
+    f.seek(jpeg_offset)
+    return f.read(jpeg_length)
+
+
+def _cr3_exif_blob(f: BinaryIO) -> Optional[bytes]:
+    """CR3 keeps the ExifIFD as a TIFF blob in moov > uuid(Canon) > CMT2."""
+    f.seek(0, os.SEEK_END)
+    moov = _find_box(f, 0, f.tell(), b'moov')
+    if not moov:
+        return None
+    for payload, box_end, box_type in _iter_boxes(f, *moov):
+        f.seek(payload)
+        if box_type != b'uuid' or f.read(16) != CR3_CANON_UUID:
+            continue
+        cmt2 = _find_box(f, payload + 16, box_end, b'CMT2')
+        if not cmt2:
+            return None
+        f.seek(cmt2[0])
+        return f.read(cmt2[1] - cmt2[0])
+    return None
+
+
+_EXIF_BLOB_EXTRACTORS = {'.raf': _raf_exif_blob, '.cr3': _cr3_exif_blob}
+
+
+def _read_exif_timestamp(path: Path) -> Optional[float]:
+    """Return DateTimeOriginal as a POSIX timestamp, or None if unavailable."""
+    try:
+        with open(path, 'rb') as f:
+            extractor = _EXIF_BLOB_EXTRACTORS.get(path.suffix.lower())
+            source: BinaryIO = f
+            if extractor:
+                blob = extractor(f)
+                if blob is None:
+                    return None
+                source = io.BytesIO(blob)
+            tags = exifread.process_file(source, stop_tag='DateTimeOriginal', details=False)
+            for key in _DATE_KEYS:
+                if key in tags:
+                    return datetime.strptime(str(tags[key]), '%Y:%m:%d %H:%M:%S').timestamp()
+    except Exception:
+        pass
+    return None
+
+
+def subfolder_name(path: Path, root: Path) -> str:
+    """First-level subfolder of root containing path; root-level files map to root's own name."""
+    try:
+        rel_parts = path.parent.relative_to(root).parts
+    except ValueError:
+        rel_parts = (path.parent.name,)
+    return rel_parts[0] if rel_parts else root.name
+
+
+def subfolder_counts(files: List[Path], root: Path) -> List[Tuple[str, int]]:
+    """Count files per first-level subfolder of root, sorted by name."""
+    return sorted(Counter(subfolder_name(f, root) for f in files).items())
+
+
 def get_creation_time(path: Path, use_cache: bool = True) -> float:
     """Get image creation time from EXIF metadata, with file system fallback."""
     path_str = str(path)
@@ -81,17 +180,7 @@ def get_creation_time(path: Path, use_cache: bool = True) -> float:
         if cached_mtime == mtime:
             return cached_ts
 
-    # Read EXIF
-    timestamp = None
-    try:
-        with open(path, 'rb') as f:
-            tags = exifread.process_file(f, stop_tag='DateTimeOriginal', details=False)
-            if 'EXIF DateTimeOriginal' in tags:
-                dt_str = str(tags['EXIF DateTimeOriginal'])
-                dt = datetime.strptime(dt_str, '%Y:%m:%d %H:%M:%S')
-                timestamp = dt.timestamp()
-    except Exception:
-        pass
+    timestamp = _read_exif_timestamp(path)
 
     # Fallback to file system date
     if timestamp is None:
