@@ -51,7 +51,8 @@ Output: `dist/RAW Viewer.app`
 | `Cmd+0-5` | Filter by minimum rating |
 | `S` | Jump to first (start) |
 | `E` | Jump to last (end) |
-| `R` | Jump to last rated |
+| `Shift+R` | Jump to last rated |
+| `R` | Rotate image 90° (view only) |
 | `I` | Toggle info overlay |
 | `H` | Toggle help overlay |
 | `J` | Toggle JPEG mode |

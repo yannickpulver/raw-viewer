@@ -61,6 +61,7 @@ class ZoomableImageView(QGraphicsView):
         self.base_zoom = 1.0  # Store the fit-to-view zoom level
         self.min_zoom = 0.1
         self.max_zoom = 10.0
+        self.rotation = 0  # degrees, view-only
 
         # Pan state
         self.panning = False
@@ -95,8 +96,26 @@ class ZoomableImageView(QGraphicsView):
         """Set the image to display."""
         self.pixmap_item.setPixmap(pixmap)
         if not pixmap.isNull():
-            self.scene.setSceneRect(pixmap.rect().toRectF())
+            self._apply_rotation()
             self.reset_zoom()
+
+    def rotate(self):
+        """Rotate the displayed image 90° clockwise (view-only)."""
+        self.rotation = (self.rotation + 90) % 360
+        if not self.pixmap_item.pixmap().isNull():
+            self._apply_rotation()
+            self.reset_zoom()
+
+    def reset_rotation(self):
+        self.rotation = 0
+        if not self.pixmap_item.pixmap().isNull():
+            self._apply_rotation()
+
+    def _apply_rotation(self):
+        rect = self.pixmap_item.pixmap().rect()
+        self.pixmap_item.setTransformOriginPoint(rect.center().toPointF())
+        self.pixmap_item.setRotation(self.rotation)
+        self.scene.setSceneRect(self.pixmap_item.sceneBoundingRect())
 
     def reset_zoom(self):
         """Fit image to view."""
@@ -672,7 +691,8 @@ class ImageViewer(QMainWindow):
 
   S            Go to start
   E            Go to end
-  R            Go to last rated
+  ⇧R          Go to last rated
+  R            Rotate 90°
 
   J            Toggle RAW/JPEG mode
   M            Toggle Video mode
@@ -1337,6 +1357,7 @@ class ImageViewer(QMainWindow):
             self.content_stack.setCurrentIndex(1)
         else:
             self.content_stack.setCurrentIndex(0)
+            self.image_view.reset_rotation()
             # Use cached full preview if available (instant)
             with self.lock:
                 cached = self.cache.get(self.files[self.index])
@@ -2298,7 +2319,13 @@ class ImageViewer(QMainWindow):
                 self._load_current()
                 self._preload_nearby()
                 self._preload_thumbnails()
-        elif key == Qt.Key.Key_R:
+        elif key == Qt.Key.Key_R and event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if self.files and self.view_mode != "video":
+                if self.compare_pinned is not None and self.compare_focus == "left":
+                    self.compare_view.rotate()
+                else:
+                    self.image_view.rotate()
+        elif key == Qt.Key.Key_R and event.modifiers() == Qt.KeyboardModifier.ShiftModifier:
             if self.files:
                 # Ensure all ratings are loaded
                 self._load_all_ratings()
