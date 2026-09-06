@@ -1,7 +1,7 @@
 """Fullscreen RAW image viewer with rating support and filmstrip."""
 
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import subprocess
@@ -12,7 +12,7 @@ import time
 
 from version import VERSION
 
-from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter, QMessageBox
+from PyQt6.QtWidgets import QMainWindow, QLabel, QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QPushButton, QFileDialog, QStackedWidget, QSlider, QSplitter, QMessageBox, QMenu
 from PyQt6.QtGui import QPixmap, QKeyEvent, QPainter, QFont, QColor, QPen, QWheelEvent, QMouseEvent, QNativeGestureEvent
 from PyQt6.QtCore import Qt, pyqtSignal, QObject, QSize, QPointF, QEvent, QTimer, QUrl
 
@@ -472,6 +472,7 @@ class ImageViewer(QMainWindow):
         self.filmstrip_visible = True
         self.min_rating_filter = 0  # 0 = show all
         self.folder_filter: Optional[str] = None  # None = all subfolders
+        self.excluded_folders: Set[str] = set()  # subfolders excluded from the "All" view
 
         # View mode: "raw", "jpeg", or "video"
         self.view_mode: str = "raw"
@@ -1409,6 +1410,8 @@ class ImageViewer(QMainWindow):
             position += "  (✕)"
         if self.folder_filter is not None:
             position += f"  [{self.folder_filter}]"
+        elif self.excluded_folders:
+            position += f"  [excl. {', '.join(sorted(self.excluded_folders))}]"
         self.pos_label.setText(position)
         self.pos_label.adjustSize()
         self.pos_label.move(self.width() - self.pos_label.width() - 10, 10)
@@ -1514,6 +1517,14 @@ class ImageViewer(QMainWindow):
             return rating == -1
         return rating >= self.min_rating_filter
 
+    def _in_folder_scope(self, f: Path, root: Optional[Path]) -> bool:
+        """True if file f is included given the current folder_filter/excluded_folders."""
+        if root is None:
+            return True
+        if self.folder_filter is not None:
+            return subfolder_name(f, root) == self.folder_filter
+        return subfolder_name(f, root) not in self.excluded_folders
+
     def _filtered_files(self) -> List[Path]:
         """all_files narrowed by the active rating and subfolder filters."""
         if self.min_rating_filter != 0:
@@ -1521,8 +1532,7 @@ class ImageViewer(QMainWindow):
         root = self._current_folder
         return [
             f for i, f in enumerate(self.all_files)
-            if self._matches_rating_filter(i)
-            and (self.folder_filter is None or root is None or subfolder_name(f, root) == self.folder_filter)
+            if self._matches_rating_filter(i) and self._in_folder_scope(f, root)
         ]
 
     def _on_filter_button(self, idx: int):
@@ -1629,6 +1639,7 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.min_rating_filter = 0
         self.folder_filter = None
+        self.excluded_folders = set()
 
         # Resume (or start) shoot selection timer for this folder
         prior = load_stats(str(folder))
@@ -1710,6 +1721,7 @@ class ImageViewer(QMainWindow):
         self.index = 0
         self.min_rating_filter = 0
         self.folder_filter = None
+        self.excluded_folders = set()
         # Clear all mode states
         for mode in self._mode_state:
             self._mode_state[mode] = self._empty_mode_state()
@@ -1734,7 +1746,8 @@ class ImageViewer(QMainWindow):
     def _empty_mode_state(self) -> dict:
         return {"files": [], "all_files": [], "index": 0,
                 "cache": LruByteCache(self.CACHE_MAX_BYTES),
-                "ratings": {}, "min_rating_filter": 0, "folder_filter": None}
+                "ratings": {}, "min_rating_filter": 0, "folder_filter": None,
+                "excluded_folders": set()}
 
     def _save_mode_state(self, mode: str):
         """Save current active state to the given mode's storage."""
@@ -1746,6 +1759,7 @@ class ImageViewer(QMainWindow):
             "ratings": self.ratings,
             "min_rating_filter": self.min_rating_filter,
             "folder_filter": self.folder_filter,
+            "excluded_folders": self.excluded_folders,
         }
 
     def _load_mode_state(self, mode: str):
@@ -1758,6 +1772,7 @@ class ImageViewer(QMainWindow):
         self.ratings = state["ratings"]
         self.min_rating_filter = state["min_rating_filter"]
         self.folder_filter = state["folder_filter"]
+        self.excluded_folders = state["excluded_folders"]
         self._rebuild_path_index()
 
     def _rebuild_path_index(self):
@@ -1830,6 +1845,46 @@ class ImageViewer(QMainWindow):
         self.mode_switcher.raise_()
         self._update_subfolder_chips()
 
+    def _make_subfolder_chip(self, folder: Optional[str], text: str) -> QPushButton:
+        """Build one subfolder chip. folder=None is the "All" chip (not excludable)."""
+        chip = QPushButton(text)
+        chip.setCheckable(True)
+        chip.setChecked(folder == self.folder_filter)
+        chip.clicked.connect(lambda checked, f=folder: self._set_folder_filter(f))
+        if folder is None:
+            chip.setStyleSheet(self.subfolder_chip_style)
+            return chip
+        excluded = folder in self.excluded_folders
+        if excluded:
+            font = chip.font()
+            font.setStrikeOut(True)
+            chip.setFont(font)
+            chip.setStyleSheet(self.subfolder_chip_style + "QPushButton { color: #666; }")
+        else:
+            chip.setStyleSheet(self.subfolder_chip_style)
+        chip.setToolTip("Right-click to include in All" if excluded else "Right-click to exclude from All")
+        chip.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        chip.customContextMenuRequested.connect(
+            lambda pos, f=folder, c=chip: self._show_folder_chip_menu(c, c.mapToGlobal(pos), f)
+        )
+        return chip
+
+    def _show_folder_chip_menu(self, chip: QPushButton, global_pos, folder: str):
+        """Right-click menu on a folder chip to toggle its exclusion from the All view."""
+        menu = QMenu(chip)
+        label = "Include in All" if folder in self.excluded_folders else "Exclude from All"
+        menu.addAction(label).triggered.connect(lambda: self._toggle_folder_excluded(folder))
+        menu.exec(global_pos)
+
+    def _toggle_folder_excluded(self, folder: str):
+        """Toggle whether a subfolder is excluded from the "All" view."""
+        if folder in self.excluded_folders:
+            self.excluded_folders.discard(folder)
+        else:
+            self.excluded_folders.add(folder)
+        self._apply_filter(self.min_rating_filter)
+        self._update_subfolder_chips()
+
     def _update_subfolder_chips(self):
         """Rebuild subfolder chips for the loaded files; hidden unless files span multiple folders."""
         layout = self.subfolder_chips.layout()
@@ -1838,13 +1893,11 @@ class ImageViewer(QMainWindow):
             stale.setParent(None)
             stale.deleteLater()
         counts = subfolder_counts(self.all_files, self._current_folder) if self._current_folder else []
-        chips = [(None, f"All ({len(self.all_files)})")] + [(name, f"{name} ({count})") for name, count in counts]
+        excluded_count = sum(count for name, count in counts if name in self.excluded_folders)
+        all_count = len(self.all_files) - excluded_count
+        chips = [(None, f"All ({all_count})")] + [(name, f"{name} ({count})") for name, count in counts]
         for folder, text in chips:
-            chip = QPushButton(text)
-            chip.setCheckable(True)
-            chip.setChecked(folder == self.folder_filter)
-            chip.setStyleSheet(self.subfolder_chip_style)
-            chip.clicked.connect(lambda checked, f=folder: self._set_folder_filter(f))
+            chip = self._make_subfolder_chip(folder, text)
             layout.addWidget(chip)
             chip.show()
         self.subfolder_chips.adjustSize()
