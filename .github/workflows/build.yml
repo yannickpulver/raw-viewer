@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-26
     permissions:
       contents: write
     outputs:
@@ -17,22 +17,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
+      - name: Select Xcode
+        # The toolbar uses macOS 26 APIs behind `#available`, so the build needs the 26 SDK.
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
 
-      - name: Install dependencies
+      - name: Install Tuist
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
+          brew tap tuist/tuist
+          brew install --formula tuist
 
       - name: Read version
         id: version
         run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
 
+      - name: Generate project
+        working-directory: mac
+        run: tuist generate --no-open
+
+      - name: Test
+        working-directory: mac
+        run: |
+          xcodebuild -project RAWViewer.xcodeproj -scheme RAWViewer \
+            -derivedDataPath build test
+
       - name: Build app
-        run: pyinstaller "RAW Viewer.spec" --noconfirm
+        working-directory: mac
+        run: |
+          xcodebuild -project RAWViewer.xcodeproj -scheme RAWViewer -configuration Release \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} build
+          # The Xcode product is RAWViewer.app; the cask and the zip ship "RAW Viewer.app".
+          mkdir -p ../dist
+          ditto build/Build/Products/Release/RAWViewer.app "../dist/RAW Viewer.app"
 
       - name: Import certificate
         env:
@@ -53,38 +69,7 @@ jobs:
         run: |
           APP="dist/RAW Viewer.app"
           IDENTITY="Developer ID Application: Yannick Pulver ($APPLE_TEAM_ID)"
-          SIGN="codesign --force --options runtime --entitlements entitlements.plist --sign"
-
-          # 1. Sign .framework bundles (inner binaries first, then the framework bundle)
-          find "$APP" -name "*.framework" -type d | sort -r | while read fw; do
-            # Sign all Mach-O files inside the framework
-            find "$fw" -type f -perm +111 | while read bin; do
-              $SIGN "$IDENTITY" "$bin"
-            done
-            # Sign the framework bundle itself
-            $SIGN "$IDENTITY" "$fw"
-          done
-
-          # 2. Sign remaining .dylib and .so files
-          find "$APP" -type f \( -name "*.dylib" -o -name "*.so" \) | while read lib; do
-            $SIGN "$IDENTITY" "$lib"
-          done
-
-          # 3. Sign standalone executables (not inside frameworks, not the main app)
-          find "$APP/Contents/MacOS" -type f -perm +111 | while read bin; do
-            $SIGN "$IDENTITY" "$bin"
-          done
-          find "$APP/Contents/Resources" -maxdepth 1 -type f -perm +111 | while read bin; do
-            $SIGN "$IDENTITY" "$bin"
-          done
-          find "$APP/Contents/Frameworks" -maxdepth 1 -type f -perm +111 | while read bin; do
-            $SIGN "$IDENTITY" "$bin"
-          done
-
-          # 4. Sign the app bundle last
-          $SIGN "$IDENTITY" "$APP"
-
-          # Verify
+          codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
           codesign --verify --deep --strict "$APP"
           echo "Signing verified successfully"
 

@@ -26,31 +26,27 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 
 ## Development
 
-```bash
-pip install -r requirements.txt
-python main.py "/path/to/photos"
-```
-
-Or run without arguments to open folder picker.
-
-## Build Executable
-
-```bash
-pip install pyinstaller
-pyinstaller --onefile --windowed --name "RAW Viewer" main.py
-```
-
-Output: `dist/RAW Viewer.app`
-
-## Native Swift app
-
-A native SwiftUI/AppKit rewrite lives in [`mac/`](mac/README.md). It follows the
-behavioural spec in [`docs/spec/`](docs/spec/README.md) and needs no Python.
+The released app is the native SwiftUI/AppKit app in [`mac/`](mac/README.md) (macOS 15+). It
+follows the behavioural spec in [`docs/spec/`](docs/spec/README.md).
 
 ```bash
 cd mac
 tuist generate --no-open
 xcodebuild -project RAWViewer.xcodeproj -scheme RAWViewer -configuration Debug build
+```
+
+## Releasing
+
+Bump [`VERSION`](VERSION) and merge to `main`. CI builds, signs and notarizes the app, publishes
+the GitHub release `v<VERSION>` and updates the Homebrew cask.
+
+## Legacy Python app
+
+The original PySide6 viewer is still in the repo root but is no longer released.
+
+```bash
+pip install -r requirements.txt
+python main.py "/path/to/photos"
 ```
 
 ## Shortcuts
