@@ -24,6 +24,7 @@ jobs:
       - name: Install Tuist
         run: |
           brew tap tuist/tuist
+          brew trust tuist/tuist
           brew install --formula tuist
 
       - name: Read version
