@@ -57,6 +57,8 @@ jobs:
             desc "RAW image viewer"
             homepage "https://github.com/yannickpulver/raw-viewer"
 
+            depends_on macos: ">= :sequoia"
+
             app "RAW Viewer.app"
 
             zap trash: [
