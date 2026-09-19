@@ -42,6 +42,17 @@ pyinstaller --onefile --windowed --name "RAW Viewer" main.py
 
 Output: `dist/RAW Viewer.app`
 
+## Native Swift app
+
+A native SwiftUI/AppKit rewrite lives in [`mac/`](mac/README.md). It follows the
+behavioural spec in [`docs/spec/`](docs/spec/README.md) and needs no Python.
+
+```bash
+cd mac
+tuist generate --no-open
+xcodebuild -project RAWViewer.xcodeproj -scheme RAWViewer -configuration Debug build
+```
+
 ## Shortcuts
 
 | Key | Action |
