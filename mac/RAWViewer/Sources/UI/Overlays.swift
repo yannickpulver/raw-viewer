@@ -35,12 +35,11 @@ struct MainToolbar: ToolbarContent {
         }
         if library.showsSubfolderChips {
             // One toolbar item per chip, so each is a native toolbar toggle with the system's
-            // own backing instead of a bordered button nested inside another item.
-            ToolbarItem {
+            // own backing instead of a bordered button nested inside another item. A group
+            // splits its views into items; `ForEach` as toolbar content needs a newer SDK.
+            ToolbarItemGroup {
                 chip(title: "All (\(library.allChipCount))", folder: nil)
-            }
-            ForEach(library.subfolderChips(), id: \.name) { chip in
-                ToolbarItem {
+                ForEach(library.subfolderChips(), id: \.name) { chip in
                     self.chip(title: "\(chip.name) (\(chip.count))", folder: chip.name)
                         .opacity(chip.excluded ? 0.5 : 1)
                         .help(chip.excluded ? "Right-click to include in All"
