@@ -77,6 +77,7 @@ public final class Library {
     private var writeChain: Task<Void, Never>?
     private var ratingsFullyLoaded = false
     private var pendingMoveSet: [URL] = []
+    private var pendingMoveShownSet: [URL] = []
 
     /// Read from `body` on the empty state, so it must not participate in observation.
     @ObservationIgnored private var summaryCache: [String: FolderSummary]?
@@ -564,6 +565,39 @@ public final class Library {
             post(SnackbarEvent(text: "Moved \(result.moved), then failed at \(error)", durationMs: 5000))
         } else {
             post(SnackbarEvent(text: "Moved \(result.moved) files to _rejected/", durationMs: 2000))
+        }
+        exitCompare()
+        openFolder(root)
+    }
+
+    // MARK: - Move shown
+
+    /// Mac app addition, mirroring `moveRejected()`. Moves every file of the current filtered
+    /// timeline (`files`) into `destination`. Returns the confirmation prompt for the UI to
+    /// show, or `nil` when there is nothing to move (in which case the snackbar has already
+    /// been posted).
+    public func moveShownPrompt(to destination: URL) async -> String? {
+        guard folder != nil, !files.isEmpty else {
+            post(SnackbarEvent(text: "No files to move", durationMs: 2000))
+            pendingMoveShownSet = []
+            return nil
+        }
+        await flushPendingWrites()
+        pendingMoveShownSet = files.map(\.url)
+        return "Move \(pendingMoveShownSet.count) files to \u{201c}\(destination.lastPathComponent)\u{201d}?"
+    }
+
+    /// Performs the move confirmed by `moveShownPrompt(to:)`, then rescans the folder.
+    public func performMoveShown(to destination: URL) async {
+        guard let root = folder, !pendingMoveShownSet.isEmpty else { return }
+        let files = pendingMoveShownSet
+        pendingMoveShownSet = []
+        let result = await Task.detached { MoveFiles.moveToFolder(files, destination: destination) }.value
+
+        if let error = result.error {
+            post(SnackbarEvent(text: "Moved \(result.moved), then failed at \(error)", durationMs: 5000))
+        } else {
+            post(SnackbarEvent(text: "Moved \(result.moved) files to \(destination.lastPathComponent)/", durationMs: 2000))
         }
         exitCompare()
         openFolder(root)

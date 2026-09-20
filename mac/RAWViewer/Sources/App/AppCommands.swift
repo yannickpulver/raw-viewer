@@ -41,6 +41,10 @@ struct AppCommands: Commands {
             Divider()
             Button("Move Rejected to _rejected") { model.moveRejected() }
                 .keyboardShortcut(.delete, modifiers: .command)
+            // Mac app addition: no Python-app equivalent.
+            Button("Move Shown Files to Folder…") { model.moveShownFiles() }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(!model.filesLoaded)
         }
 
         CommandMenu("Rate") {
@@ -59,6 +63,11 @@ struct AppCommands: Commands {
                 }
                 .keyboardShortcut(KeyEquivalent(Character("\(value)")), modifiers: .command)
             }
+            // Mac app addition: an "unrated only" bucket alongside the filter values above.
+            Button("Filter: Unrated") {
+                Task { await library.setRatingFilter(RatingFilter.unratedValue) }
+            }
+            .keyboardShortcut("0", modifiers: [.command, .option])
         }
 
         CommandMenu("Navigate") {

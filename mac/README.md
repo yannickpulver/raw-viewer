@@ -83,6 +83,8 @@ scanning and sidecar I/O happens off the main thread.
 | `toggleInfo()` · `toggleFilmstrip()` | `I`, `Cmd+S` |
 | `moveRejected() async -> String?` | returns the alert prompt, or `nil` (snackbar already posted) |
 | `performMoveRejected() async` | run after the user confirms; rescans afterwards |
+| `moveShownPrompt(to: URL) async -> String?` | returns the alert prompt for moving `files` into `to`, or `nil` (snackbar already posted) |
+| `performMoveShown(to: URL) async` | run after the user confirms; rescans afterwards |
 | `flushPendingWrites() async` | before quit; `loadAllRatings() async` for a full disk sweep |
 | `filmstripVisibleRange(_:)` · `gridVisibleRange(_:)` · `restartBackgroundSweep()` | preload hooks |
 | `persistShootStats()` | call on quit; also writes the folder summary |
@@ -145,6 +147,13 @@ Concurrency: 1 current image, 6 nearby previews, 4 thumbnails, 1 full RAW develo
   last rating key.
 - `PreloadScheduler.preview(for:)` is a peek: it does not refresh LRU recency, because SwiftUI
   reads it from `body`. `setCurrent(_:)` does the recency touch.
+- Rating filter has an 8th bucket, "unrated only" (`RatingFilter.unratedValue`, `-2`; matches
+  `rating == 0`), as a toolbar segment between `All` and `1+`, a Rate menu item, and `Opt+Cmd+0`.
+  No Python-app equivalent.
+- File menu "Move Shown Files to Folder…" (`Shift+Cmd+M`) moves every file of the current
+  filtered timeline, plus its XMP sidecar, into one user-chosen folder, flat. See
+  `docs/spec/05-ratings-and-xmp.md` §10 addendum and `Sidecar/MoveFiles.swift`. No Python-app
+  equivalent.
 
 Behaviour the spec flags as "likely unintended" is kept as shipped, notably: the `All`
 rating bucket hides rejected files, and the `J` snackbar guard only fires from RAW mode.

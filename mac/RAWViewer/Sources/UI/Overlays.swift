@@ -186,6 +186,7 @@ struct FilterToolbar: View {
 
             Picker("Rating filter", selection: filter) {
                 Text("All").tag(0)
+                Text("0").tag(RatingFilter.unratedValue)
                 Text("1+").tag(1)
                 Text("2+").tag(2)
                 Text("3+").tag(3)
@@ -284,13 +285,15 @@ private struct OverlayPanel<Content: View>: View {
 struct HelpOverlay: View {
     let onClose: () -> Void
 
-    /// Verbatim from spec 01 §5.
+    /// Verbatim from spec 01 §5, plus the two Mac app additions (⌥⌘0, ⇧⌘M).
     static let text = """
       ←/→         Navigate images
       0-5          Rate current image
       X            Reject (toggle)
       ⌘0-5        Filter by rating
+      ⌥⌘0         Filter unrated
       ⌘⌫          Move rejected to _rejected/
+      ⇧⌘M         Move shown files to folder…
 
       S            Go to start
       E            Go to end

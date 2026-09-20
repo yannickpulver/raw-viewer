@@ -89,6 +89,30 @@ public final class AppModel {
         }
     }
 
+    /// Mac app addition, mirroring `moveRejected()`. Prompts for a destination folder, then
+    /// confirms before moving every file of the current filtered timeline into it.
+    func moveShownFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Move Here"
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        Task {
+            guard let prompt = await library.moveShownPrompt(to: destination) else { return }
+            let alert = NSAlert()
+            alert.messageText = prompt
+            alert.informativeText = "XMP sidecars move with their files. This can't be undone in the app."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Yes")
+            alert.addButton(withTitle: "No")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            await library.performMoveShown(to: destination)
+        }
+    }
+
     func quit() {
         NSApp.terminate(nil)
     }

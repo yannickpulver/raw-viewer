@@ -291,6 +291,30 @@ See `01` section 23. Key detail: after a successful move the app rescans the
 folder from scratch, which rebuilds `all_files`, `path_index`, ratings and the
 filmstrip (`viewer.py:2467`).
 
+### Mac app addition: move shown files to a folder
+
+No Python-app equivalent. "Move Shown Files to Folder…" (File menu,
+`Shift+Cmd+M`) moves every file of the current filtered timeline (`files` for
+the active mode, which may span several subfolders) into one folder the user
+picks, flat — no subfolder structure is recreated.
+
+- The user picks a destination via an open panel (folders only, can create a
+  new one).
+- Pending sidecar writes are flushed first, then the move runs off the main
+  thread and the folder is rescanned afterwards, the same as move-rejected.
+- Only the file itself and its XMP sidecar (`<stem>.xmp`, same directory) move.
+  A JPEG/RAW sibling that is not itself part of the filtered list is left
+  behind.
+- A destination-name collision gets a ` 2`, ` 3`… suffix, same as
+  move-rejected. When the file has a sidecar, the sidecar is renamed to the
+  same numbered stem so the rating stays attached to the right file.
+- A RAW and JPEG that share one sidecar move it once, with whichever of the
+  two is processed first.
+- A file already sitting in the destination folder is skipped.
+- Stops at the first OS error, same convention as move-rejected.
+- An empty filtered list is a no-op with a snackbar, same as "No rejected
+  files".
+
 ---
 
 ## 11. Shoot selection timer and stats
