@@ -302,6 +302,10 @@ Button index 0..5 maps to `min_rating_filter = index`; index 6 maps to `-1`
 (rejected only) (`viewer.py:1538`). Exactly one is checked at a time
 (`viewer.py:1542`).
 
+Mac app addition: the native toolbar has an 8th segment, `0`, between `All`
+and `1+`, mapping to `min_rating_filter = -2` (unrated only, see §13). No
+Python-app equivalent.
+
 Shared button style (`viewer.py:844`):
 
 | State | Values |
@@ -644,6 +648,9 @@ Applying a filter (`viewer.py:1478`):
 Ratings for every file are read from disk before a non-zero filter is applied
 (`viewer.py:1531`), which is the only place a full folder rating sweep happens
 outside of `Shift+R` and the Resolve export.
+
+Mac app addition: `min_rating_filter = -2` is an "unrated only" bucket,
+matching only `rating == 0`. No Python-app equivalent.
 
 ### Subfolder filter
 

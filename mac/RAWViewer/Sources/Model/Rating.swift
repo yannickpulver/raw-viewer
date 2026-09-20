@@ -18,7 +18,7 @@ public enum Rating {
     }
 }
 
-/// 0 = all, 1...5 = minimum rating, -1 = rejected only. Spec 01 §13.
+/// 0 = all, 1...5 = minimum rating, -1 = rejected only, -2 = unrated only. Spec 01 §13.
 public struct RatingFilter: Equatable, Sendable {
     public var value: Int
 
@@ -26,13 +26,18 @@ public struct RatingFilter: Equatable, Sendable {
 
     public static let all = RatingFilter(0)
     public static let rejectedOnly = RatingFilter(-1)
+    /// Mac app addition: exactly `rating == 0`, i.e. never rated (and not rejected).
+    public static let unratedValue = -2
+    public static let unratedOnly = RatingFilter(unratedValue)
 
     public var isActive: Bool { value != 0 }
 
     /// Spec 01 §13: `-1` matches only rejected; otherwise `rating >= value`.
     /// Consequence (kept as shipped): the `All` bucket hides rejected files.
+    /// Mac app addition: `-2` matches only unrated (`rating == 0`).
     public func matches(rating: Int) -> Bool {
         if value == -1 { return rating == -1 }
+        if value == RatingFilter.unratedValue { return rating == 0 }
         return rating >= value
     }
 
@@ -40,6 +45,7 @@ public struct RatingFilter: Equatable, Sendable {
     public var badgeText: String? {
         if value == 0 { return nil }
         if value == -1 { return "✕" }
+        if value == RatingFilter.unratedValue { return "0★" }
         return "≥\(value)★"
     }
 }

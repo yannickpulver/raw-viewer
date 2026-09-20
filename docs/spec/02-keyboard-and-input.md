@@ -67,6 +67,11 @@ Consequence of exact matching: adding an extra modifier disables a binding.
 | `Backspace` | Cmd or Ctrl | — | move rejected files to `_rejected/` | `viewer.py:2423` |
 | `G` | none | — | toggle grid view | `viewer.py:2426` |
 
+Mac app additions, no Python-app equivalent: `0` with `Opt+Cmd` sets the
+rating filter to "unrated only" (see spec 01 §13); `M` with `Shift+Cmd` opens
+"Move Shown Files to Folder…" (see spec 05 §10 addendum). Both are menu-bar
+commands, not part of the single key dispatcher table above.
+
 ### Bindings with no modifier check
 
 `→`, `←`, `I`, `E`, `O`, `Esc`, `J`, `M`, `Space`, `H` and `T` do not test the

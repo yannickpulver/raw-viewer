@@ -91,10 +91,22 @@ final class ModeStateTests: XCTestCase {
         XCTAssertEqual(state.allChipCount, 2)
     }
 
+    /// Mac app addition: the "unrated only" bucket. Spec 01 §13.
+    func testUnratedOnlyFilter() {
+        var state = sampleState()
+        state.ratingFilter = RatingFilter(RatingFilter.unratedValue)
+        state.applyFilters(ratings: [
+            state.allFiles[1].url: -1,
+            state.allFiles[2].url: 3,
+        ])
+        XCTAssertEqual(state.files.map(\.name), ["a.cr3", "d.cr3"])
+    }
+
     func testRatingFilterBadgeText() {
         XCTAssertNil(RatingFilter(0).badgeText)
         XCTAssertEqual(RatingFilter(3).badgeText, "≥3★")
         XCTAssertEqual(RatingFilter(-1).badgeText, "✕")
+        XCTAssertEqual(RatingFilter(RatingFilter.unratedValue).badgeText, "0★")
     }
 
     func testRatingClamp() {
