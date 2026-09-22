@@ -13,6 +13,7 @@ public final class Preferences {
             Keys.showInfo: true,
             Keys.filmstripVisible: true,
             Keys.didImportLegacyCache: false,
+            Keys.newestFirst: false,
         ])
     }
 
@@ -21,6 +22,7 @@ public final class Preferences {
         public static let filmstripVisible = "filmstripVisible"
         public static let didImportLegacyCache = "didImportLegacyCache"
         public static let recentFolders = "recentFolders"
+        public static let newestFirst = "newestFirst"
     }
 
     public var showInfo: Bool {
@@ -36,5 +38,10 @@ public final class Preferences {
     public var didImportLegacyCache: Bool {
         get { defaults.bool(forKey: Keys.didImportLegacyCache) }
         set { defaults.set(newValue, forKey: Keys.didImportLegacyCache) }
+    }
+
+    public var newestFirst: Bool {
+        get { defaults.bool(forKey: Keys.newestFirst) }
+        set { defaults.set(newValue, forKey: Keys.newestFirst) }
     }
 }

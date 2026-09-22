@@ -285,7 +285,7 @@ private struct OverlayPanel<Content: View>: View {
 struct HelpOverlay: View {
     let onClose: () -> Void
 
-    /// Verbatim from spec 01 §5, plus the two Mac app additions (⌥⌘0, ⇧⌘M).
+    /// Verbatim from spec 01 §5, plus the Mac app additions (⌥⌘0, ⇧⌘M, ⇧⌘N).
     static let text = """
       ←/→         Navigate images
       0-5          Rate current image
@@ -294,6 +294,7 @@ struct HelpOverlay: View {
       ⌥⌘0         Filter unrated
       ⌘⌫          Move rejected to _rejected/
       ⇧⌘M         Move shown files to folder…
+      ⇧⌘N         Toggle newest first
 
       S            Go to start
       E            Go to end

@@ -20,6 +20,7 @@ public struct ModeState: Sendable {
     public var ratingFilter: RatingFilter = .all
     public var folderFilter: String?
     public var excludedFolders: Set<String> = []
+    public var newestFirst: Bool = false
 
     public init() {}
 
@@ -38,6 +39,7 @@ public struct ModeState: Sendable {
             if let folderFilter { return file.subfolder == folderFilter }
             return !excludedFolders.contains(file.subfolder)
         }
+        if newestFirst { files.reverse() }
         if let previous, let kept = files.firstIndex(of: previous) {
             index = kept
         } else {

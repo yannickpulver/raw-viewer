@@ -70,7 +70,10 @@ Consequence of exact matching: adding an extra modifier disables a binding.
 Mac app additions, no Python-app equivalent: `0` with `Opt+Cmd` sets the
 rating filter to "unrated only" (see spec 01 §13); `M` with `Shift+Cmd` opens
 "Move Shown Files to Folder…" (see spec 05 §10 addendum). Both are menu-bar
-commands, not part of the single key dispatcher table above.
+commands, not part of the single key dispatcher table above. `N` with
+`Shift+Cmd` toggles the "Newest First" View-menu option, a persisted
+(UserDefaults) preference that reverses the per-mode timeline order (oldest-
+first is the default) while keeping the current file selected.
 
 ### Bindings with no modifier check
 

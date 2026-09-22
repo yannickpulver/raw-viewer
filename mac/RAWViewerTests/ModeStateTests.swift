@@ -109,6 +109,18 @@ final class ModeStateTests: XCTestCase {
         XCTAssertEqual(RatingFilter(RatingFilter.unratedValue).badgeText, "0★")
     }
 
+    /// Mac app addition: newest-first reverses the timeline and keeps the same file selected.
+    func testNewestFirstReversesOrderAndKeepsSelection() {
+        var state = sampleState()
+        state.applyFilters(ratings: [:])
+        state.index = 1  // b.cr3
+        state.newestFirst = true
+        state.applyFilters(ratings: [:])
+        XCTAssertEqual(state.files.map(\.name), ["d.cr3", "c.cr3", "b.cr3", "a.cr3"])
+        XCTAssertEqual(state.currentFile?.name, "b.cr3")
+        XCTAssertEqual(state.index, 2)
+    }
+
     func testRatingClamp() {
         XCTAssertEqual(Rating.clamp(-5), -1)
         XCTAssertEqual(Rating.clamp(9), 5)
