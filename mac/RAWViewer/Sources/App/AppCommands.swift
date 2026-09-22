@@ -89,6 +89,10 @@ struct AppCommands: Commands {
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(!model.filesLoaded)
             Button(Self.title("Toggle Info Overlay", "I")) { library.toggleInfo() }
+            // Mac app addition: no Python-app equivalent.
+            Toggle("Newest First", isOn: Binding(get: { library.newestFirst },
+                                                  set: { _ in library.toggleNewestFirst() }))
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
             Button(Self.title("Rotate 90°", "R")) { model.rotate() }
                 .disabled(!model.filesLoaded || model.isVideoMode)

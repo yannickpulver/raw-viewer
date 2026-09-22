@@ -380,6 +380,19 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(second.filmstripVisible)
     }
 
+    /// Mac app addition: newest-first reverses the timeline and persists across instances.
+    func testToggleNewestFirstReversesFilesAndPersists() async throws {
+        try await seedRawFolder()
+        let original = library.files.map(\.name)
+        library.toggleNewestFirst()
+        XCTAssertTrue(library.newestFirst)
+        XCTAssertEqual(library.files.map(\.name), original.reversed())
+
+        let second = Library(preferences: Preferences(defaults: defaults),
+                             recents: RecentFolders(defaults: defaults))
+        XCTAssertTrue(second.newestFirst)
+    }
+
     // MARK: - Shoot stats
 
     func testStatsLinesWithNoFolder() {

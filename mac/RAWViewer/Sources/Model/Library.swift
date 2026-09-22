@@ -48,6 +48,7 @@ public final class Library {
     public var focusedPane: ComparePane = .right
     public var showInfo: Bool { didSet { preferences.showInfo = showInfo } }
     public var filmstripVisible: Bool { didSet { preferences.filmstripVisible = filmstripVisible } }
+    public var newestFirst: Bool { didSet { preferences.newestFirst = newestFirst } }
 
     public private(set) var isScanning = false
     public private(set) var scanProgressText: String?
@@ -124,6 +125,7 @@ public final class Library {
         self.scheduler = scheduler ?? PreloadScheduler()
         self.showInfo = preferences.showInfo
         self.filmstripVisible = preferences.filmstripVisible
+        self.newestFirst = preferences.newestFirst
         recents.importLegacyIfNeeded(preferences: preferences)
         self.scheduler.onRatingDiscovered = { [weak self] url, rating in
             guard let self, self.ratings[url] == nil else { return }
@@ -227,6 +229,7 @@ public final class Library {
         for kind in MediaKind.allCases {
             var modeState = ModeState()
             modeState.allFiles = result.files(for: kind)
+            modeState.newestFirst = newestFirst
             modeState.applyFilters(ratings: ratings)
             states[kind] = modeState
         }
@@ -444,6 +447,20 @@ public final class Library {
         scheduler.stopBackgroundSweep()
         state.folderFilter = name
         state.applyFilters(ratings: ratings)
+        afterFilterChange()
+    }
+
+    /// Mac app addition: no Python-app equivalent. Flips newest-first for every mode's timeline,
+    /// keeping the current selection where it survives. Persists even with no folder loaded.
+    public func toggleNewestFirst() {
+        newestFirst.toggle()
+        for kind in MediaKind.allCases {
+            var modeState = modeStates[kind] ?? ModeState()
+            modeState.newestFirst = newestFirst
+            modeState.applyFilters(ratings: ratings)
+            modeStates[kind] = modeState
+        }
+        scheduler.stopBackgroundSweep()
         afterFilterChange()
     }
 
