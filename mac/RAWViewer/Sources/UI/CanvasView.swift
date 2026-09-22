@@ -5,9 +5,11 @@ import SwiftUI
 /// Zoom / pan / rotate canvas. Spec 01 §15-16, 02 §3-5.
 ///
 /// `zoom` 1.0 means fit-to-window; it is a multiplier on top of the fit scale.
+/// Zoom and pan survive navigation so the same region can be inspected across a burst;
+/// only rotation resets per image. Zooming out stops at fit.
 final class CanvasNSView: NSView {
 
-    static let minZoom = 0.1
+    static let minZoom = 1.0
     static let maxZoom = 10.0
 
     private let imageLayer = CALayer()
@@ -16,9 +18,9 @@ final class CanvasNSView: NSView {
     private(set) var displayedImage: CGImage?
     private(set) var displayedURL: URL?
 
-    private var zoom: Double = 1.0
+    private(set) var zoom: Double = 1.0
     private var rotationSteps: Int = 0
-    private var offset: CGPoint = .zero
+    private(set) var offset: CGPoint = .zero
     private var panOrigin: NSPoint?
     private var lastSwipe: Date = .distantPast
 
@@ -51,10 +53,8 @@ final class CanvasNSView: NSView {
         guard !(sameImage && sameURL) else { return }
 
         if !sameURL {
-            // Spec 01 §15-16: a new image re-fits and clears rotation.
-            zoom = 1.0
+            // Spec 01 §15: a new image clears rotation. Zoom and pan are kept (spec 01 §16).
             rotationSteps = 0
-            offset = .zero
         }
         displayedImage = image
         displayedURL = url
@@ -139,11 +139,16 @@ final class CanvasNSView: NSView {
         applyTransform()
     }
 
-    /// Spec 01 §16: reject out of range instead of clamping; anchor at `anchor` (view coords).
-    private func applyZoom(target: Double, anchor: CGPoint) {
-        guard target >= Self.minZoom, target <= Self.maxZoom else { return }
+    /// Spec 01 §16: clamp to `[minZoom, maxZoom]`; anchor at `anchor` (view coords).
+    /// Landing on fit also re-centres, so swipe navigation works again right away.
+    func applyZoom(target: Double, anchor: CGPoint) {
+        let target = min(max(target, Self.minZoom), Self.maxZoom)
         let previous = zoom
-        guard previous > 0 else { return }
+        guard previous > 0, target != previous else { return }
+        if target == Self.minZoom {
+            resetZoom()
+            return
+        }
         let k = CGFloat(target / previous)
         let centre = CGPoint(x: bounds.midX, y: bounds.midY)
         let position = CGPoint(x: centre.x + offset.x, y: centre.y + offset.y)

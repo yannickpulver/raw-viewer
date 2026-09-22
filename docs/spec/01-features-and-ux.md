@@ -705,13 +705,13 @@ Applies to `ZoomableImageView` (`viewer.py:48`).
 |---|---|---|
 | Fit to window | on every `set_pixmap`, and on resize while at fit | `viewer.py:100`, `:209` |
 | `zoom_factor` | 1.0 means fit-to-window; it is a multiplier on top of fit, not an absolute scale | `viewer.py:126` |
-| Minimum zoom | 0.1 | `viewer.py:62` |
+| Minimum zoom | 1.0 (fit) — the Swift app no longer zooms out below fit; the Python app allowed 0.1 | `CanvasView.swift` |
 | Maximum zoom | 10.0 | `viewer.py:63` |
-| Bounds check | a zoom step is applied only if the resulting factor lands inside `[0.1, 10.0]`; otherwise nothing happens — it does not clamp | `viewer.py:138` |
+| Bounds check | the Swift app clamps to `[1.0, 10.0]` and re-centres when landing on fit; the Python app rejected out-of-range steps instead | `CanvasView.swift` |
 | "At fit" test | `abs(zoom_factor - 1.0) < 0.01` | `viewer.py:130` |
 | `Space` toggle | at fit → jump to 2.0x; otherwise → back to fit | `viewer.py:128` |
 | Double-click | always back to fit | `viewer.py:204` |
-| Reset on navigate | yes — loading a new pixmap calls `reset_zoom` | `viewer.py:100` |
+| Reset on navigate | no — the Swift app keeps zoom and pan across images (only rotation resets); the Python app re-fit on every `set_pixmap` | `CanvasView.swift` |
 | Pinch | `factor = 1.0 + gesture.value()`, anchored at the gesture position | `viewer.py:157` |
 | Mouse drag | left button pans by the raw pixel delta; cursor becomes a closed hand | `viewer.py:180` |
 | Two-finger scroll while at fit | horizontal only, navigates images when `abs(dx) > 30` | `viewer.py:168` |
