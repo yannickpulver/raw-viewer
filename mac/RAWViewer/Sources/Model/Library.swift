@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Observation
 
@@ -43,6 +44,9 @@ public final class Library {
     /// Bumped on every ratings mutation so views that draw rating badges repaint even when
     /// neither the selection nor `ratings.count` changes (re-rating the same file).
     public private(set) var ratingsRevision: Int = 0
+    /// Bumped on every multi-selection mutation. Like `ratingsRevision`, a closure stored in a
+    /// view model struct is invisible to change detection, so grid/filmstrip repaint on this.
+    public private(set) var selectionRevision: Int = 0
 
     public private(set) var pinnedFile: MediaFile?
     public var focusedPane: ComparePane = .right
@@ -234,6 +238,7 @@ public final class Library {
             states[kind] = modeState
         }
         modeStates = states
+        selectionRevision &+= 1
         viewMode = .raw
 
         // Spec 01 §10: with no RAW, switch to whichever of JPEG/video has more files, JPEG wins ties.
@@ -272,6 +277,7 @@ public final class Library {
         modeStates = [.raw: ModeState(), .jpeg: ModeState(), .video: ModeState()]
         ratings.removeAll()
         ratingsRevision &+= 1
+        selectionRevision &+= 1
         ratingsFullyLoaded = false
         folder = nil
         viewMode = .raw
@@ -309,6 +315,8 @@ public final class Library {
     public func select(index newIndex: Int) {
         guard newIndex >= 0, newIndex < files.count else { return }
         state.index = newIndex
+        state.selectOnly(index: newIndex)
+        selectionRevision &+= 1
         refreshPreloading()
         // Spec 04 §7: the background thumbnail sweep restarts from the new position.
         restartBackgroundSweep()
@@ -329,7 +337,58 @@ public final class Library {
         }
         guard target != state.index else { return }
         state.index = target
+        state.selectOnly(index: target)
+        selectionRevision &+= 1
         // Spec 02 §2: grid arrow navigation deliberately does not preload previews.
+    }
+
+    // MARK: - Multi-select (mac app addition, no Python-app equivalent)
+
+    /// Click on a grid or filmstrip cell. Shift extends the range from the anchor, Cmd toggles
+    /// just that file, otherwise the selection collapses to it. The clicked index always
+    /// becomes the current `index`, even when a Cmd-click deselects it.
+    public func click(index: Int, modifiers: NSEvent.ModifierFlags) {
+        guard index >= 0, index < files.count else { return }
+        if modifiers.contains(.shift) {
+            state.extendSelection(to: index)
+        } else if modifiers.contains(.command) {
+            state.toggleSelection(at: index)
+        } else {
+            state.selectOnly(index: index)
+        }
+        state.index = index
+        selectionRevision &+= 1
+        refreshPreloading()
+        restartBackgroundSweep()
+    }
+
+    /// The selected files, resolved back into current timeline order.
+    public var selectedFiles: [MediaFile] {
+        let selected = state.selectedURLs
+        return files.filter { selected.contains($0.url) }
+    }
+
+    public func isSelected(index: Int) -> Bool {
+        guard index >= 0, index < files.count else { return false }
+        return state.selectedURLs.contains(files[index].url)
+    }
+
+    public func selectAll() {
+        state.selectAll()
+        selectionRevision &+= 1
+    }
+
+    /// Collapses the selection to just the current file. Returns `true` when it actually
+    /// changed anything, so `Escape` knows whether it consumed the key. Guarding on `count > 1`
+    /// is not enough: a Cmd-click can leave a selection of exactly one file that is *not* the
+    /// current one (e.g. cmd-click B onto {A}, then cmd-click A off, leaving {B} with B still
+    /// current) — that still needs clearing, same as an empty selection would.
+    @discardableResult
+    public func clearMultiSelection() -> Bool {
+        guard let current = currentFile, state.selectedURLs != [current.url] else { return false }
+        state.selectOnly(index: state.index)
+        selectionRevision &+= 1
+        return true
     }
 
     private func refreshPreloading() {
@@ -474,6 +533,7 @@ public final class Library {
     }
 
     private func afterFilterChange() {
+        selectionRevision &+= 1
         scheduler.reset(totalFileCount: files.count)
         refreshPreloading()
         restartBackgroundSweep()
@@ -501,6 +561,7 @@ public final class Library {
         guard target != viewMode else { return }
         exitCompare()
         viewMode = target
+        selectionRevision &+= 1
         scheduler.reset(totalFileCount: files.count)
         refreshPreloading()
         restartBackgroundSweep()

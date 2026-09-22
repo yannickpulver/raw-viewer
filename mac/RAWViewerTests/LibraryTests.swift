@@ -317,6 +317,85 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(library.displayMode, .single)
     }
 
+    // MARK: - Multi-select
+
+    func testPlainClickCollapsesSelectionAndBecomesCurrent() async throws {
+        try await seedRawFolder()
+        library.selectAll()
+        library.click(index: 2, modifiers: [])
+        XCTAssertEqual(library.index, 2)
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.files[2].url])
+    }
+
+    func testShiftClickExtendsRangeFromAnchor() async throws {
+        try await seedRawFolder()
+        library.click(index: 1, modifiers: [])
+        library.click(index: 3, modifiers: .shift)
+        XCTAssertEqual(library.index, 3)
+        XCTAssertEqual(library.selectedFiles.map(\.name), ["IMG_0001.cr3", "IMG_0002.cr3", "IMG_0003.cr3"])
+    }
+
+    func testCommandClickTogglesAndStaysCurrentEvenWhenDeselected() async throws {
+        try await seedRawFolder()
+        library.click(index: 0, modifiers: [])
+        library.click(index: 1, modifiers: .command)
+        XCTAssertEqual(library.selectedFiles.map(\.name), ["IMG_0000.cr3", "IMG_0001.cr3"])
+        XCTAssertEqual(library.index, 1)
+
+        // Cmd-clicking the current file back out of the selection still leaves it current.
+        library.click(index: 1, modifiers: .command)
+        XCTAssertEqual(library.selectedFiles.map(\.name), ["IMG_0000.cr3"])
+        XCTAssertEqual(library.index, 1)
+    }
+
+    func testSelectAllSelectsEveryFile() async throws {
+        try await seedRawFolder()
+        library.selectAll()
+        XCTAssertEqual(library.selectedFiles.count, 4)
+    }
+
+    func testClearMultiSelectionCollapsesToCurrentAndReportsWhetherItDidAnything() async throws {
+        try await seedRawFolder()
+        XCTAssertFalse(library.clearMultiSelection(), "a single-file selection has nothing to clear")
+
+        library.selectAll()
+        XCTAssertTrue(library.clearMultiSelection())
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.currentFile?.url])
+    }
+
+    /// A `count > 1` guard misses a selection of exactly one file that is not the current one:
+    /// cmd-click B onto {A} (current A) gives {A,B} current B; cmd-clicking A back off gives
+    /// {B} with B still current — one file selected, and it happens to match `index`, but the
+    /// stale case (selection of one file that is NOT current) still needs to be clearable.
+    func testClearMultiSelectionHandlesASingleNonCurrentFile() async throws {
+        try await seedRawFolder()
+        library.click(index: 0, modifiers: [])              // current A, selection {A}
+        library.click(index: 1, modifiers: .command)         // current B, selection {A,B}
+        library.click(index: 0, modifiers: .command)         // current A, selection {B}
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.files[1].url])
+        XCTAssertEqual(library.index, 0)
+
+        XCTAssertTrue(library.clearMultiSelection())
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.currentFile?.url])
+    }
+
+    /// Arrow navigation and `select(index:)` always collapse the selection to the landed file.
+    func testNavigateCollapsesSelectionToTheLandedFile() async throws {
+        try await seedRawFolder()
+        library.selectAll()
+        library.navigate(by: 1)
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.currentFile?.url])
+    }
+
+    func testGridMoveCollapsesSelectionToTheLandedFile() async throws {
+        for index in 0..<10 { touch(String(format: "IMG_%04d.cr3", index)) }
+        try await openAndWait(root)
+        library.gridColumns = 4
+        library.selectAll()
+        library.gridMove(dx: 1, dy: 0)
+        XCTAssertEqual(library.selectedFiles.map(\.url), [library.currentFile?.url])
+    }
+
     // MARK: - Jump to last rated
 
     func testJumpToLastRatedIgnoresRejected() async throws {

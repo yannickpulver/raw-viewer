@@ -8,6 +8,16 @@ struct GridModel {
     var thumbRevision: Int
     /// See `FilmstripModel.ratingsRevision`: a value change is invisible to `ratings.count`.
     var ratingsRevision: Int
+    /// See `ratingsRevision`: a closure alone is invisible to change detection, hence the
+    /// paired `selectionRevision`.
+    var isSelected: (Int) -> Bool
+    var selectionRevision: Int
+    /// The current multi-selection, resolved into `files` order — what a right-click on an
+    /// already-selected cell acts on. A closure, not a snapshot array: `isSelected` already
+    /// calls live into `Library`, and a `selectedURLs` array frozen at the last SwiftUI body
+    /// pass would go stale between clicks within the same body (cmd-click then immediately
+    /// right-click the same cell) — both need to see the same live selection.
+    var selectedURLs: () -> [URL]
     var thumb200: (URL) -> CGImage?
     var thumb80: (URL) -> CGImage?
 }
@@ -18,8 +28,10 @@ final class GridCanvasView: NSView {
     var model: GridModel?
     var columns: Int = 1
     var cellSize: Int = GridLayout.cell
-    var onSelect: ((Int) -> Void)?
+    var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     var onActivate: ((Int) -> Void)?
+    /// Kept alive across the popup and any share sheet it opens. See `SelectionMenuController`.
+    private var selectionMenuController: SelectionMenuController?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
@@ -55,6 +67,13 @@ final class GridCanvasView: NSView {
                 context.restoreGState()
             }
 
+            // Selection border first, current-file border last, so white always wins when a
+            // cell is both.
+            if model.isSelected(i) {
+                context.setStrokeColor(Theme.amberBorderCGColor)
+                context.setLineWidth(2)
+                context.stroke(CGRect(x: x - 2, y: y - 2, width: side + 4, height: side + 4).insetBy(dx: 1, dy: 1))
+            }
             if i == model.index {
                 context.setStrokeColor(NSColor.white.cgColor)
                 context.setLineWidth(3)
@@ -87,17 +106,54 @@ final class GridCanvasView: NSView {
         let index = GridLayout.index(atX: point.x, y: point.y, columns: columns,
                                      total: model.files.count, cell: cellSize)
         guard index >= 0 else { return }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // AppKit delivers a control-click as `mouseDown` with `.control` set, not as
+        // `rightMouseDown` — that is the standard right-click on a one-button mouse or
+        // trackpad, so it opens the same menu instead of falling through to a plain select.
+        if modifiers.contains(.control) {
+            openMenu(at: index, point: point)
+            return
+        }
         if event.clickCount == 2 {
             onActivate?(index)
         } else {
-            onSelect?(index)
+            onClick?(index, modifiers)
         }
+    }
+
+    /// Right-click on an already-selected cell acts on the whole selection; otherwise the
+    /// click first collapses the selection to that cell. Spec: mac app addition.
+    override func rightMouseDown(with event: NSEvent) {
+        guard let model else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let index = GridLayout.index(atX: point.x, y: point.y, columns: columns,
+                                     total: model.files.count, cell: cellSize)
+        guard index >= 0 else { return }
+        openMenu(at: index, point: point)
+    }
+
+    private func openMenu(at index: Int, point: NSPoint) {
+        guard let model else { return }
+        let urls: [URL]
+        if model.isSelected(index) {
+            urls = model.selectedURLs()
+        } else {
+            onClick?(index, [])
+            urls = [model.files[index].url]
+        }
+
+        let origin = GridLayout.cellOrigin(index: index, columns: columns, cell: cellSize)
+        let rect = NSRect(x: CGFloat(origin.x), y: CGFloat(origin.y),
+                          width: CGFloat(cellSize), height: CGFloat(cellSize))
+        let controller = SelectionMenuController(urls: urls, view: self, rect: rect)
+        selectionMenuController = controller
+        controller.makeMenu().popUp(positioning: nil, at: point, in: self)
     }
 }
 
 struct GridView: NSViewRepresentable {
     var model: GridModel
-    var onSelect: (Int) -> Void
+    var onClick: (Int, NSEvent.ModifierFlags) -> Void
     var onActivate: (Int) -> Void
     var onLayout: (Int) -> Void
     var onVisibleRange: (Range<Int>) -> Void
@@ -112,6 +168,7 @@ struct GridView: NSViewRepresentable {
         var lastRevision = -1
         var lastCount = -1
         var lastRatingsRevision = -1
+        var lastSelectionRevision = -1
         var pushedInitialRange = false
 
         @objc func boundsChanged(_ note: Notification) {
@@ -171,7 +228,7 @@ struct GridView: NSViewRepresentable {
         canvas.model = model
         canvas.columns = columns
         canvas.cellSize = cell
-        canvas.onSelect = onSelect
+        canvas.onClick = onClick
         canvas.onActivate = onActivate
 
         coordinator.columns = columns
@@ -187,10 +244,12 @@ struct GridView: NSViewRepresentable {
         if layoutChanged || coordinator.lastRevision != model.thumbRevision
             || coordinator.lastCount != model.files.count
             || coordinator.lastRatingsRevision != model.ratingsRevision
+            || coordinator.lastSelectionRevision != model.selectionRevision
             || coordinator.lastIndex != model.index {
             coordinator.lastRevision = model.thumbRevision
             coordinator.lastCount = model.files.count
             coordinator.lastRatingsRevision = model.ratingsRevision
+            coordinator.lastSelectionRevision = model.selectionRevision
             canvas.needsDisplay = true
         }
         if coordinator.lastIndex != model.index {

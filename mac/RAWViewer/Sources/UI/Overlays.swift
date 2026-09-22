@@ -314,8 +314,12 @@ struct HelpOverlay: View {
       O            Show in Finder
       ⌘L          Open all in Lightroom
       ⌘D          Export to DaVinci Resolve
-      Esc          Close folder
+      Esc          Close overlay, selection, grid, then folder
       ⌘Q          Quit
+
+      ⇧Click       Select range (grid/filmstrip)
+      ⌘Click      Toggle selection (grid/filmstrip)
+      ⌘A          Select all
     """
 
     var body: some View {

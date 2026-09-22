@@ -30,8 +30,11 @@ struct ContentView: View {
                     model: FilmstripModel(files: files, index: index, ratings: ratings,
                                           thumbRevision: thumbRevision,
                                           ratingsRevision: library.ratingsRevision,
+                                          isSelected: { library.isSelected(index: $0) },
+                                          selectionRevision: library.selectionRevision,
+                                          selectedURLs: { library.selectedFiles.map(\.url) },
                                           thumb: { scheduler.thumb80(for: $0) }),
-                    onSelect: { library.select(index: $0) },
+                    onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
                     onVisibleRange: { library.filmstripVisibleRange($0) })
                 .frame(height: Theme.filmstripHeight)
                 .background(Theme.stripArea)
@@ -146,9 +149,12 @@ struct ContentView: View {
             model: GridModel(files: library.files, index: library.index, ratings: library.ratings,
                              thumbRevision: scheduler.thumbs80.count &+ scheduler.thumbs200.count,
                              ratingsRevision: library.ratingsRevision,
+                             isSelected: { library.isSelected(index: $0) },
+                             selectionRevision: library.selectionRevision,
+                             selectedURLs: { library.selectedFiles.map(\.url) },
                              thumb200: { scheduler.thumb200(for: $0) },
                              thumb80: { scheduler.thumb80(for: $0) }),
-            onSelect: { library.select(index: $0) },
+            onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
             onActivate: { library.select(index: $0); library.toggleGrid() },
             onLayout: { columns in
                 if library.gridColumns != columns { library.gridColumns = columns }
