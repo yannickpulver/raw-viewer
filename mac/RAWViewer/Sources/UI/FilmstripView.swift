@@ -11,6 +11,14 @@ struct FilmstripModel {
     /// Bumped on every ratings mutation. `ratings.count` is not enough: re-rating the file that
     /// is already selected (last file, pinned pane) changes a value, never the count.
     var ratingsRevision: Int
+    /// See `ratingsRevision`: a closure alone is invisible to change detection, hence the
+    /// paired `selectionRevision`.
+    var isSelected: (Int) -> Bool
+    var selectionRevision: Int
+    /// The current multi-selection, resolved into `files` order — what a right-click on an
+    /// already-selected cell acts on. See `GridModel.selectedURLs`: a closure, not a snapshot,
+    /// so it can't go stale relative to `isSelected` within the same SwiftUI body pass.
+    var selectedURLs: () -> [URL]
     var thumb: (URL) -> CGImage?
 }
 
@@ -80,7 +88,9 @@ final class FilmstripScroller: NSScroller {
 final class FilmstripContentView: NSView {
 
     var model: FilmstripModel?
-    var onSelect: ((Int) -> Void)?
+    var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
+    /// Kept alive across the popup and any share sheet it opens. See `SelectionMenuController`.
+    private var selectionMenuController: SelectionMenuController?
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
@@ -120,6 +130,13 @@ final class FilmstripContentView: NSView {
                 context.restoreGState()
             }
 
+            // Selection border first, current-file border last, so white always wins when a
+            // cell is both.
+            if model.isSelected(i) {
+                context.setStrokeColor(Theme.amberBorderCGColor)
+                context.setLineWidth(2)
+                context.stroke(CGRect(x: x - 2, y: y - 2, width: 84, height: 84).insetBy(dx: 1, dy: 1))
+            }
             if i == model.index {
                 context.setStrokeColor(NSColor.white.cgColor)
                 context.setLineWidth(3)
@@ -151,7 +168,42 @@ final class FilmstripContentView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         let index = Int(floor(point.x / Theme.thumbStride))
         guard index >= 0, index < model.files.count else { return }
-        onSelect?(index)
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // AppKit delivers a control-click as `mouseDown` with `.control` set, not as
+        // `rightMouseDown` — that is the standard right-click on a one-button mouse or
+        // trackpad, so it opens the same menu instead of falling through to a plain select.
+        if modifiers.contains(.control) {
+            openMenu(at: index, point: point)
+            return
+        }
+        onClick?(index, modifiers)
+    }
+
+    /// Right-click on an already-selected cell acts on the whole selection; otherwise the
+    /// click first collapses the selection to that cell. Spec: mac app addition.
+    override func rightMouseDown(with event: NSEvent) {
+        guard let model else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let index = Int(floor(point.x / Theme.thumbStride))
+        guard index >= 0, index < model.files.count else { return }
+        openMenu(at: index, point: point)
+    }
+
+    private func openMenu(at index: Int, point: NSPoint) {
+        guard let model else { return }
+        let urls: [URL]
+        if model.isSelected(index) {
+            urls = model.selectedURLs()
+        } else {
+            onClick?(index, [])
+            urls = [model.files[index].url]
+        }
+
+        let x = CGFloat(index) * Theme.thumbStride
+        let rect = NSRect(x: x, y: 4, width: Theme.thumbSize, height: Theme.thumbSize)
+        let controller = SelectionMenuController(urls: urls, view: self, rect: rect)
+        selectionMenuController = controller
+        controller.makeMenu().popUp(positioning: nil, at: point, in: self)
     }
 
     /// Spec 02 §4: two-finger scroll uses `scrollingDeltaX`; a vertical wheel becomes horizontal.
@@ -171,7 +223,7 @@ final class FilmstripContentView: NSView {
 
 struct FilmstripView: NSViewRepresentable {
     var model: FilmstripModel
-    var onSelect: (Int) -> Void
+    var onClick: (Int, NSEvent.ModifierFlags) -> Void
     var onVisibleRange: (Range<Int>) -> Void
 
     final class Coordinator: NSObject {
@@ -181,6 +233,7 @@ struct FilmstripView: NSViewRepresentable {
         var lastRevision: Int = -1
         var lastCount: Int = -1
         var lastRatingsRevision: Int = -1
+        var lastSelectionRevision: Int = -1
         var pushedInitialRange = false
 
         @objc func boundsChanged(_ note: Notification) {
@@ -230,7 +283,7 @@ struct FilmstripView: NSViewRepresentable {
         guard let content = scroll.documentView as? FilmstripContentView else { return }
         context.coordinator.onVisibleRange = onVisibleRange
         content.model = model
-        content.onSelect = onSelect
+        content.onClick = onClick
 
         let width = max(scroll.bounds.width, CGFloat(model.files.count) * Theme.thumbStride)
         let height = scroll.contentSize.height
@@ -243,10 +296,12 @@ struct FilmstripView: NSViewRepresentable {
             || coordinator.lastRevision != model.thumbRevision
             || coordinator.lastCount != model.files.count
             || coordinator.lastRatingsRevision != model.ratingsRevision
+            || coordinator.lastSelectionRevision != model.selectionRevision
         if changed {
             coordinator.lastRevision = model.thumbRevision
             coordinator.lastCount = model.files.count
             coordinator.lastRatingsRevision = model.ratingsRevision
+            coordinator.lastSelectionRevision = model.selectionRevision
             content.needsDisplay = true
         }
 

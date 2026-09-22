@@ -14,6 +14,8 @@ enum Theme {
 
     static let amber = Color(.sRGB, red: 1, green: 180.0 / 255.0, blue: 0, opacity: 200.0 / 255.0)
     static let amberBorder = Color(.sRGB, red: 1, green: 180.0 / 255.0, blue: 0, opacity: 1)
+    /// `amberBorder`'s value as a `CGColor`, for the AppKit-drawn grid/filmstrip selection border.
+    static let amberBorderCGColor = CGColor(red: 1, green: 180.0 / 255.0, blue: 0, alpha: 1)
     static let updateGreen = Color(.sRGB, red: 80.0 / 255.0, green: 180.0 / 255.0, blue: 80.0 / 255.0, opacity: 220.0 / 255.0)
 
     static let ratingDot = Color(.sRGB, red: 1, green: 200.0 / 255.0, blue: 50.0 / 255.0, opacity: 1)

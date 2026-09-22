@@ -69,8 +69,12 @@ public final class AppModel {
         if isVideoMode { video.togglePlay() } else { zoomToken += 1 }
     }
 
-    /// Spec 02 §1-2: compare → exit compare, grid → exit grid, otherwise close the folder.
+    /// Spec 02 §1-2, plus the mac app's overlays and multi-selection: help → stats →
+    /// multi-selection → grid → compare → close the folder.
     func escape() {
+        if showHelp { showHelp = false; return }
+        if showStats { showStats = false; return }
+        if library.clearMultiSelection() { return }
         if isGrid { library.toggleGrid(); return }
         if library.isCompareActive { library.exitCompare(); return }
         library.closeFolder()
@@ -157,6 +161,10 @@ public final class AppModel {
         let key = event.keyCode
         let characters = event.charactersIgnoringModifiers?.lowercased() ?? ""
 
+        // Escape's overlay / multi-selection / grid / compare / folder ladder runs before the
+        // grid-mode refusal below, which would otherwise swallow it via KeyCode.escape.
+        if key == KeyCode.escape { escape(); return true }
+
         // Grid mode gets first refusal.
         if isGrid {
             switch key {
@@ -164,7 +172,7 @@ public final class AppModel {
             case KeyCode.left: library.gridMove(dx: -1, dy: 0); return true
             case KeyCode.down: library.gridMove(dx: 0, dy: 1); return true
             case KeyCode.up: library.gridMove(dx: 0, dy: -1); return true
-            case KeyCode.ret, KeyCode.enter, KeyCode.escape: library.toggleGrid(); return true
+            case KeyCode.ret, KeyCode.enter: library.toggleGrid(); return true
             case KeyCode.space where bare: return true
             default: break
             }
@@ -179,6 +187,7 @@ public final class AppModel {
             case "l": guard filesLoaded else { return true }; library.openInLightroom(); return true
             case "d": Task { await library.exportToResolve() }; return true
             case "s": guard filesLoaded else { return true }; library.toggleFilmstrip(); return true
+            case "a": guard filesLoaded else { return true }; library.selectAll(); return true
             case "q", "w": quit(); return true
             default: break
             }
@@ -214,7 +223,6 @@ public final class AppModel {
         switch key {
         case KeyCode.right: library.navigate(by: 1); return true
         case KeyCode.left: library.navigate(by: -1); return true
-        case KeyCode.escape: escape(); return true
         case KeyCode.space: toggleSpace(); return true
         default: break
         }
