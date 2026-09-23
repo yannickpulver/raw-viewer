@@ -18,6 +18,7 @@ public enum AppPaths {
 
     public static var dateCacheFile: URL { cachesDirectory.appendingPathComponent("dates.json") }
     public static var thumbnailCacheDirectory: URL { cachesDirectory.appendingPathComponent("thumbs", isDirectory: true) }
+    public static var faceCacheDirectory: URL { cachesDirectory.appendingPathComponent("faces", isDirectory: true) }
     public static var shootStatsFile: URL { applicationSupportDirectory.appendingPathComponent("shoot_stats.json") }
     public static var folderSummariesFile: URL { applicationSupportDirectory.appendingPathComponent("folder_summaries.json") }
 

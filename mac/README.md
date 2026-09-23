@@ -50,7 +50,9 @@ scanning and sidecar I/O happens off the main thread.
 | `snackbar: SnackbarEvent?` | post-once event with `text` + `durationMs`; call `clearSnackbar()` |
 | `resolveStatus: String?` | Resolve export status |
 | `pinnedFile`, `focusedPane`, `isCompareActive` | compare mode |
-| `showInfo`, `filmstripVisible` | persisted overlay toggles |
+| `showInfo`, `filmstripVisible`, `showFaces` | persisted overlay toggles |
+| `faceDetection` | persisted, set on the dashboard; while on, every opened folder is swept |
+| `faceIndex: FaceIndex` | face results per URL (`faces(for:)`) |
 | `recentFolders: [URL]` | empty-state recents list |
 | `folderSummary(for:) -> FolderSummary?` | cached counts + rating histogram for a recent folder |
 | `scheduler: PreloadScheduler` | images (see below) |
@@ -80,7 +82,7 @@ scanning and sidecar I/O happens off the main thread.
 | `toggleExcluded(_ folder: String)` | chip right-click |
 | `switchViewMode(_ kind:toggle:)` | `toggle: true` = `J`/`M`, `toggle: false` = mode buttons |
 | `toggleGrid()` · `toggleCompare()` · `focusPane(_:)` · `exitCompare()` | display / compare |
-| `toggleInfo()` · `toggleFilmstrip()` | `I`, `Cmd+S` |
+| `toggleInfo()` · `toggleFilmstrip()` · `toggleFaces()` | `I`, `Cmd+S`, `F` |
 | `moveRejected() async -> String?` | returns the alert prompt, or `nil` (snackbar already posted) |
 | `performMoveRejected() async` | run after the user confirms; rescans afterwards |
 | `moveShownPrompt(to: URL) async -> String?` | returns the alert prompt for moving `files` into `to`, or `nil` (snackbar already posted) |
@@ -112,6 +114,11 @@ Concurrency: 1 current image, 6 nearby previews, 4 thumbnails, 1 full RAW develo
 - A RAW whose embedded preview is far smaller than the source gets a `CIRAWFilter`
   full develop on a background queue, swapped in when ready (the DJI DNG path).
 - `showInfo` and `filmstripVisible` persist in `UserDefaults`.
+- Faces (no Python-app equivalent): with "Detect faces" on on the dashboard, `FaceIndex` runs
+  Apple Vision over every still of the active mode of every opened folder, one image at a time,
+  the one on screen first. `F` only shows or hides the result. Results are cached per folder
+  in `faces/` under the caches directory, invalidated by mtime. "Eyes closed" is a heuristic on
+  the landmark eye contours (`FaceDetector.closedEyeRatio`); Vision has no blink API.
 - Caches live in `~/Library/Caches/dev.yannickpulver.rawviewer/`, shoot stats in
   `~/Library/Application Support/RAW Viewer/`. The old `~/.cache/raw-viewer/`
   recents and shoot stats are imported once on first launch.

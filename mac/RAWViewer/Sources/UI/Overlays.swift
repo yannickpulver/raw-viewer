@@ -111,33 +111,81 @@ struct FilterBadge: View {
 
 struct InfoBlock: View {
     let model: AppModel
+    /// Height of the window toolbar; `0` when there is none (full screen with a hidden bar).
+    let toolbarHeight: CGFloat
     var library: Library { model.library }
+
+    /// The position line sits in the toolbar row, centred on the toolbar items. An active
+    /// rating filter puts its badge at that spot, so the block then drops below the toolbar.
+    private var inToolbarRow: Bool {
+        library.showInfo && !library.files.isEmpty && library.filterBadgeText == nil && toolbarHeight >= 20
+    }
 
     var body: some View {
         let fraction = library.scheduler.progressFraction
         VStack(alignment: .trailing, spacing: 0) {
-            if library.showInfo && !library.files.isEmpty {
-                Text(library.positionText)
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .chromeTextShadow()
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                Text(library.infoText)
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .chromeTextShadow()
-                    .padding(.horizontal, 12).padding(.vertical, 6)
+            // Text only: clicks and window drags pass through to the toolbar and canvas.
+            Group {
+                if library.showInfo, let file = library.currentFile {
+                    InfoRow(name: file.name, date: library.captureDateText,
+                            rating: library.rating(for: file.url), position: library.positionText)
+                        .padding(.horizontal, 12).padding(.vertical, inToolbarRow ? 0 : 6)
+                        .frame(height: inToolbarRow ? toolbarHeight : nil)
+                }
+                // Spec 01 §4: deliberately not gated on showInfo.
+                if !library.files.isEmpty && fraction < 1 {
+                    Text("Loading: \(Int(fraction * 100))%")
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundStyle(Theme.dimText)
+                        .padding(.horizontal, 10).padding(.vertical, 4)
+                        .chromeSurface(.regularMaterial, cornerRadius: 6, scrim: 0.45)
+                }
             }
-            // Spec 01 §4: deliberately not gated on showInfo.
-            if !library.files.isEmpty && fraction < 1 {
-                Text("Loading: \(Int(fraction * 100))%")
-                    .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(Theme.dimText)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .chromeSurface(.regularMaterial, cornerRadius: 6, scrim: 0.45)
+            .allowsHitTesting(false)
+            if library.showsFaces, let file = library.currentFile {
+                FacePanel(model: model, file: file)
+                    .padding(.top, 4)
             }
         }
-        .padding(.top, 10).padding(.trailing, 10)
+        .padding(.top, inToolbarRow ? 0 : toolbarHeight + 10).padding(.trailing, 10)
+    }
+}
+
+/// `1/105` as the title, `DSCF1703.RAF · Sun, 20 Sep · 11:50 · ★★★☆☆` as the subtitle, both
+/// right-aligned so the pair fits the toolbar row.
+private struct InfoRow: View {
+    let name: String
+    let date: String
+    let rating: Int
+    let position: String
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(position)
+                .font(.system(size: 14, weight: .semibold).monospacedDigit())
+                .foregroundStyle(.white)
+            HStack(spacing: 5) {
+                Text(name)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Color.white.opacity(0.9))
+                dot
+                Text(date)
+                    .monospacedDigit()
+                    .foregroundStyle(Color.white.opacity(0.7))
+                dot
+                Text(Rating.stars(rating))
+                    .foregroundStyle(rating == Rating.rejected ? Theme.rejectRed
+                                     : rating > 0 ? Theme.ratingDot : Color.white.opacity(0.6))
+            }
+            .font(.system(size: 11))
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .chromeTextShadow()
+    }
+
+    private var dot: some View {
+        Text("·").fontWeight(.bold).foregroundStyle(Color.white.opacity(0.45))
     }
 }
 
@@ -263,7 +311,7 @@ private struct OverlayPanel<Content: View>: View {
 struct HelpOverlay: View {
     let onClose: () -> Void
 
-    /// Verbatim from spec 01 §5, plus the Mac app additions (⌥⌘0, ⇧⌘M, ⇧⌘N).
+    /// Verbatim from spec 01 §5, plus the Mac app additions (⌥⌘0, ⇧⌘M, ⇧⌘N, F).
     static let text = """
       ←/→         Navigate images
       0-5          Rate current image
@@ -285,6 +333,7 @@ struct HelpOverlay: View {
       I            Toggle info overlay
       ⌘S          Toggle filmstrip
       G            Toggle grid view
+      F            Toggle faces
       H            Toggle this help
       T            Toggle shoot stats
 
@@ -366,8 +415,17 @@ struct EmptyStateView: View {
             .offset(y: -40)
             .onAppear { model.library.reloadFolderSummaries() }
 
-            VStack {
+            VStack(spacing: 10) {
                 Spacer()
+                // Mac app addition: one switch for every folder. `F` then shows / hides them.
+                Toggle(isOn: Binding(get: { model.library.faceDetection },
+                                     set: { model.library.faceDetection = $0 })) {
+                    Text("Detect faces")
+                        .font(.system(size: 12))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("Finds faces in every folder you open, on this Mac. Press F to show or hide them.")
                 Text("v\(version)")
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundStyle(.tertiary)

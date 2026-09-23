@@ -1,7 +1,7 @@
 import AppKit
 
-/// The grid/filmstrip right-click menu: Share, Reveal in Finder, Copy. Mac app addition, no
-/// Python-app equivalent.
+/// The grid/filmstrip/canvas right-click menu: Share, Reveal in Finder, Copy, Copy Path. Mac app
+/// addition, no Python-app equivalent.
 ///
 /// Owns the URLs and the `NSSharingServicePicker` for the lifetime of the menu interaction.
 /// `NSMenuItem.target` is weak, so the caller must retain this controller (typically as a
@@ -13,6 +13,7 @@ final class SelectionMenuController: NSObject {
     private let urls: [URL]
     private weak var view: NSView?
     private let rect: NSRect
+    private let pasteboard: NSPasteboard
     /// Kept alive for the lifetime of the picker; otherwise it is deallocated before the share
     /// sheet appears.
     private var picker: NSSharingServicePicker?
@@ -21,10 +22,12 @@ final class SelectionMenuController: NSObject {
     ///   - urls: The files the menu acts on.
     ///   - view: The view to anchor the share sheet to.
     ///   - rect: The clicked cell's frame in `view`'s coordinates.
-    init(urls: [URL], view: NSView, rect: NSRect) {
+    ///   - pasteboard: Where Copy writes; tests pass a private one.
+    init(urls: [URL], view: NSView, rect: NSRect, pasteboard: NSPasteboard = .general) {
         self.urls = urls
         self.view = view
         self.rect = rect
+        self.pasteboard = pasteboard
     }
 
     func makeMenu() -> NSMenu {
@@ -35,6 +38,7 @@ final class SelectionMenuController: NSObject {
         menu.addItem(item(plural ? "Reveal \(count) Photos in Finder" : "Reveal in Finder",
                           action: #selector(reveal)))
         menu.addItem(item(plural ? "Copy \(count) Photos" : "Copy", action: #selector(copyURLs)))
+        menu.addItem(item(plural ? "Copy \(count) Paths" : "Copy Path", action: #selector(copyPaths)))
         return menu
     }
 
@@ -63,11 +67,16 @@ final class SelectionMenuController: NSObject {
     }
 
     @objc private func copyURLs() {
-        let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         // Plain-text paths alongside the file URLs, so pasting into a text field (Mail
         // compose, a chat, a shell) yields something instead of nothing.
         let paths = urls.map(\.path).joined(separator: "\n")
         pasteboard.writeObjects(urls.map { $0 as NSURL } + [paths as NSString])
+    }
+
+    /// Text only, one path per line, so a paste into Finder does not copy the files.
+    @objc private func copyPaths() {
+        pasteboard.clearContents()
+        pasteboard.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
     }
 }

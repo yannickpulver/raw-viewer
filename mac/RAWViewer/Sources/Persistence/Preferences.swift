@@ -14,6 +14,8 @@ public final class Preferences {
             Keys.filmstripVisible: true,
             Keys.didImportLegacyCache: false,
             Keys.newestFirst: false,
+            Keys.showFaces: true,
+            Keys.faceDetection: false,
         ])
     }
 
@@ -23,6 +25,8 @@ public final class Preferences {
         public static let didImportLegacyCache = "didImportLegacyCache"
         public static let recentFolders = "recentFolders"
         public static let newestFirst = "newestFirst"
+        public static let showFaces = "showFaces"
+        public static let faceDetection = "faceDetection"
     }
 
     public var showInfo: Bool {
@@ -43,5 +47,15 @@ public final class Preferences {
     public var newestFirst: Bool {
         get { defaults.bool(forKey: Keys.newestFirst) }
         set { defaults.set(newValue, forKey: Keys.newestFirst) }
+    }
+
+    public var showFaces: Bool {
+        get { defaults.bool(forKey: Keys.showFaces) }
+        set { defaults.set(newValue, forKey: Keys.showFaces) }
+    }
+
+    public var faceDetection: Bool {
+        get { defaults.bool(forKey: Keys.faceDetection) }
+        set { defaults.set(newValue, forKey: Keys.faceDetection) }
     }
 }

@@ -94,6 +94,10 @@ struct AppCommands: Commands {
                 .disabled(!model.filesLoaded)
             Button(Self.title("Toggle Info Overlay", "I")) { library.toggleInfo() }
             // Mac app addition: no Python-app equivalent.
+            Toggle(Self.title("Show Faces", "F"), isOn: Binding(get: { library.showFaces },
+                                                                set: { _ in library.toggleFaces() }))
+                .disabled(!library.faceDetection)
+            // Mac app addition: no Python-app equivalent.
             Toggle("Newest First", isOn: Binding(get: { library.newestFirst },
                                                   set: { _ in library.toggleNewestFirst() }))
                 .keyboardShortcut("n", modifiers: [.command, .shift])

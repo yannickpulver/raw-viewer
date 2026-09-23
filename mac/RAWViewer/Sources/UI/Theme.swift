@@ -28,6 +28,7 @@ enum Theme {
     static let filmstripHeight: CGFloat = 124
     static let thumbSize: CGFloat = 80
     static let thumbStride: CGFloat = 84
+    static let faceThumbSize: CGFloat = 64
 }
 
 // MARK: - Native chrome surfaces
