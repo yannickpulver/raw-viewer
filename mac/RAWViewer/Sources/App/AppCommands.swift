@@ -20,6 +20,10 @@ struct AppCommands: Commands {
     }
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { model.checkForUpdates() }
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("Open Folder…") { model.openFolderPanel() }
                 .keyboardShortcut("o", modifiers: .command)

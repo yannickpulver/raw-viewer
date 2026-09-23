@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import Sparkle
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -13,6 +14,18 @@ public final class AppModel {
 
     public let library = Library()
     let video = VideoController()
+
+    /// Checks the appcast at launch and every 24h, and shows Sparkle's own dialog. Local builds
+    /// carry `CFBundleVersion` 1, so the scheduled check stays off in Debug.
+    @ObservationIgnored
+    private let updater = SPUStandardUpdaterController(
+        startingUpdater: !AppModel.isDebug, updaterDelegate: nil, userDriverDelegate: nil)
+
+    #if DEBUG
+    private static let isDebug = true
+    #else
+    private static let isDebug = false
+    #endif
 
     var showHelp = false
     var showStats = false
@@ -122,8 +135,7 @@ public final class AppModel {
     }
 
     func checkForUpdates() {
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        Task { await library.checkForUpdates(currentVersion: version) }
+        updater.checkForUpdates(nil)
     }
 
     // MARK: - Key dispatch (spec 02 §1-2)

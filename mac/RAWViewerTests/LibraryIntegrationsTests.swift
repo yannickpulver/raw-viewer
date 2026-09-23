@@ -47,12 +47,4 @@ final class LibraryIntegrationsTests: XCTestCase {
         library.revealInFinder()
         XCTAssertNil(library.snackbar)
     }
-
-    func testUpdateCheckIsSkippedForDevBuilds() async {
-        await library.checkForUpdates(currentVersion: "dev")
-        XCTAssertNil(library.updateAvailable)
-
-        await library.checkForUpdates(currentVersion: "")
-        XCTAssertNil(library.updateAvailable)
-    }
 }

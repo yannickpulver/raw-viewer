@@ -177,12 +177,7 @@ struct ContentView: View {
         }
         ZStack(alignment: .bottomLeading) {
             Color.clear
-            // The update banner shares the row with the corner buttons, whose own padding
-            // supplies the gap, so it can never collide with the chrome above.
-            HStack(spacing: 0) {
-                CornerButtons(model: model)
-                if let update = library.updateAvailable { UpdateBanner(info: update) }
-            }
+            CornerButtons(model: model)
         }
         ZStack(alignment: .bottom) {
             Color.clear

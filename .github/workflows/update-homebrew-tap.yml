@@ -58,6 +58,7 @@ jobs:
             homepage "https://github.com/yannickpulver/raw-viewer"
 
             depends_on macos: ">= :sequoia"
+            auto_updates true
 
             app "RAW Viewer.app"
 

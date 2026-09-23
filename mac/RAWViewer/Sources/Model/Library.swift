@@ -14,17 +14,6 @@ public struct SnackbarEvent: Identifiable, Equatable, Sendable {
     }
 }
 
-/// An available GitHub release. Spec 01 §20.
-public struct UpdateInfo: Equatable, Sendable {
-    public let version: String
-    public let url: URL
-
-    public init(version: String, url: URL) {
-        self.version = version
-        self.url = url
-    }
-}
-
 /// The single source of truth the UI binds to.
 @MainActor
 @Observable
@@ -58,7 +47,6 @@ public final class Library {
     public private(set) var scanProgressText: String?
     public private(set) var snackbar: SnackbarEvent?
     public var resolveStatus: String?
-    public var updateAvailable: UpdateInfo?
     /// Guard for spec 06 §6: a second export is refused while one runs.
     public private(set) var isExportingToResolve = false
 
@@ -735,12 +723,6 @@ public final class Library {
         case .failure(let message):
             post(SnackbarEvent(text: message, durationMs: 5000))
         }
-    }
-
-    /// Runs once at launch. Spec 01 §20.
-    public func checkForUpdates(currentVersion: String) async {
-        guard let release = await UpdateCheck.check(currentVersion: currentVersion) else { return }
-        updateAvailable = UpdateInfo(version: release.version, url: release.url)
     }
 
     // MARK: - Shoot timer (spec 05 §11)
