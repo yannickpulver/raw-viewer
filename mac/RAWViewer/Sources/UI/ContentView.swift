@@ -111,12 +111,7 @@ struct ContentView: View {
     }
 
     private var singleCanvas: some View {
-        CanvasView(image: image(for: library.currentFile),
-                   url: library.currentFile?.url,
-                   rotationToken: model.rotationToken,
-                   zoomToken: model.zoomToken,
-                   onNavigate: { library.navigate(by: $0) },
-                   onFocus: {})
+        SingleCanvasPane(model: model, image: image(for: library.currentFile))
     }
 
     /// Spec 01 §9: 50/50, left pinned, focused pane gets a 2 px amber border.
@@ -167,9 +162,14 @@ struct ContentView: View {
 
     @ViewBuilder
     private var overlays: some View {
-        ZStack(alignment: .topTrailing) {
-            Color.clear
-            InfoBlock(model: model)
+        // The info block reaches up into the toolbar row. The reader stays inside the safe area,
+        // because only there does it report the toolbar height; the block itself then ignores
+        // that area to climb into the row. Its text lets clicks and window drags through; only
+        // the face crops below it take clicks.
+        GeometryReader { geometry in
+            InfoBlock(model: model, toolbarHeight: geometry.safeAreaInsets.top)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .ignoresSafeArea(edges: .top)
         }
         ZStack(alignment: .bottomTrailing) {
             Color.clear
@@ -236,5 +236,26 @@ struct ContentView: View {
             model.openFirstDirectory(in: collected.compactMap { $0 })
         }
         return true
+    }
+}
+
+/// The single-image canvas. Its own view so the face results, which land several times a
+/// second during a sweep, re-render only the canvas and `FacePanel`, not the whole window.
+private struct SingleCanvasPane: View {
+    let model: AppModel
+    let image: CGImage?
+    var library: Library { model.library }
+
+    var body: some View {
+        let file = library.currentFile
+        CanvasView(image: image,
+                   url: file?.url,
+                   rotationToken: model.rotationToken,
+                   zoomToken: model.zoomToken,
+                   faces: library.showsFaces ? file.flatMap { library.faceIndex.faces(for: $0.url) } ?? [] : [],
+                   faceFocusToken: model.faceFocusToken,
+                   faceFocus: model.faceFocus,
+                   onNavigate: { library.navigate(by: $0) },
+                   onFocus: {})
     }
 }

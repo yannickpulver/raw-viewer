@@ -33,6 +33,9 @@ public final class AppModel {
     var rotationToken = 0
     var compareRotationToken = 0
     var zoomToken = 0
+    /// Bumped to ask the canvas to zoom onto `faceFocus`.
+    var faceFocusToken = 0
+    var faceFocus: CGRect?
     var statsTick = 0
 
     private init() {}
@@ -75,6 +78,11 @@ public final class AppModel {
         } else {
             rotationToken += 1
         }
+    }
+
+    func focusFace(_ rect: CGRect) {
+        faceFocus = rect
+        faceFocusToken += 1
     }
 
     /// Spec 02 §1: `Space` is play/pause in video mode, 2x zoom otherwise.
@@ -227,6 +235,7 @@ public final class AppModel {
             case "r": rotate(); return true
             case "c": library.toggleCompare(); return true
             case "g": library.toggleGrid(); return true
+            case "f": library.toggleFaces(); return true
             default: break
             }
         }

@@ -42,6 +42,17 @@ public final class Library {
     public var showInfo: Bool { didSet { preferences.showInfo = showInfo } }
     public var filmstripVisible: Bool { didSet { preferences.filmstripVisible = filmstripVisible } }
     public var newestFirst: Bool { didSet { preferences.newestFirst = newestFirst } }
+    /// Set on the dashboard, for every folder: while on, `faceIndex` sweeps each folder opened.
+    public var faceDetection: Bool {
+        didSet {
+            preferences.faceDetection = faceDetection
+            // Turning detection on should show something right away.
+            if faceDetection { showFaces = true }
+            refreshFaceIndex()
+        }
+    }
+    /// `F`: face boxes on the canvas plus the face crops. Display only; detection keeps running.
+    public var showFaces: Bool { didSet { preferences.showFaces = showFaces } }
 
     public private(set) var isScanning = false
     public private(set) var scanProgressText: String?
@@ -54,6 +65,7 @@ public final class Library {
     public var gridColumns: Int = 1
 
     public let scheduler: PreloadScheduler
+    public let faceIndex: FaceIndex
 
     // MARK: - Dependencies
 
@@ -110,14 +122,18 @@ public final class Library {
     public init(preferences: Preferences = .shared,
                 recents: RecentFolders = .shared,
                 scheduler: PreloadScheduler? = nil,
-                summaryStore: FolderSummaryStore = .shared) {
+                summaryStore: FolderSummaryStore = .shared,
+                faceIndex: FaceIndex? = nil) {
         self.preferences = preferences
         self.recents = recents
         self.summaryStore = summaryStore
         self.scheduler = scheduler ?? PreloadScheduler()
+        self.faceIndex = faceIndex ?? FaceIndex()
         self.showInfo = preferences.showInfo
         self.filmstripVisible = preferences.filmstripVisible
         self.newestFirst = preferences.newestFirst
+        self.showFaces = preferences.showFaces
+        self.faceDetection = preferences.faceDetection
         recents.importLegacyIfNeeded(preferences: preferences)
         self.scheduler.onRatingDiscovered = { [weak self] url, rating in
             guard let self, self.ratings[url] == nil else { return }
@@ -240,6 +256,7 @@ public final class Library {
         scheduler.reset(totalFileCount: files.count)
         refreshPreloading()
         restartBackgroundSweep()
+        refreshFaceIndex()
 
         // Deliberate addition (see README): sweep every rating in the background right after a
         // scan so the cached dashboard histogram is complete, not just the files that were
@@ -260,6 +277,7 @@ public final class Library {
         persistShootStats()   // shoot timer + dashboard summary
         resetShootTimer()
         scheduler.closeFolder()
+        faceIndex.stop()
         pinnedFile = nil
         focusedPane = .right
         modeStates = [.raw: ModeState(), .jpeg: ModeState(), .video: ModeState()]
@@ -308,6 +326,7 @@ public final class Library {
         refreshPreloading()
         // Spec 04 §7: the background thumbnail sweep restarts from the new position.
         restartBackgroundSweep()
+        if faceDetection { faceIndex.prioritise(currentFile) }
     }
 
     /// Grid arrow navigation. Horizontal moves clamp; vertical uses `GridLayout`. Spec 02 §2.
@@ -553,6 +572,7 @@ public final class Library {
         scheduler.reset(totalFileCount: files.count)
         refreshPreloading()
         restartBackgroundSweep()
+        refreshFaceIndex()
     }
 
     public func toggleGrid() {
@@ -595,6 +615,29 @@ public final class Library {
     public func toggleFilmstrip() {
         guard !files.isEmpty else { return }
         filmstripVisible.toggle()
+    }
+
+    public func toggleFaces() {
+        guard faceDetection else {
+            post(SnackbarEvent(text: "Face detection is off. Turn it on on the start screen.", durationMs: 3000))
+            return
+        }
+        showFaces.toggle()
+    }
+
+    /// Faces show in the single view only; grid, compare and video keep their own chrome.
+    public var showsFaces: Bool {
+        faceDetection && showFaces && !files.isEmpty && displayMode == .single && !isCompareActive
+            && viewMode != .video
+    }
+
+    /// Faces are for stills only; video mode and detection turned off stop the sweep.
+    private func refreshFaceIndex() {
+        guard faceDetection, let folder, viewMode != .video, !allFiles.isEmpty else {
+            faceIndex.stop()
+            return
+        }
+        faceIndex.start(folder: folder, files: allFiles, current: currentFile)
     }
 
     public func post(_ event: SnackbarEvent) { snackbar = event }
@@ -878,11 +921,20 @@ public final class Library {
     }
 
     /// `"{filename}  |  {YYYY-MM-DD HH:MM}  |  {stars}"`.
-    public var infoText: String {
-        guard let file = currentFile else { return "" }
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        return "\(file.name)  |  \(formatter.string(from: file.captureDate))  |  \(Rating.stars(rating(for: file.url)))"
+    /// The current file's capture date for the info row. See `formatCaptureDate`.
+    public var captureDateText: String {
+        currentFile.map { Self.formatCaptureDate($0.captureDate) } ?? ""
+    }
+
+    /// `Sat, 20 Sep · 11:50` in the user's locale; the year only shows when it is not this year.
+    public static func formatCaptureDate(_ date: Date, now: Date = Date(), locale: Locale = .current,
+                                         calendar: Calendar = .current) -> String {
+        var day = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+            .weekday(.abbreviated).day().month(.abbreviated)
+        if !calendar.isDate(date, equalTo: now, toGranularity: .year) { day = day.year() }
+        let time = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, calendar: calendar,
+                                    timeZone: calendar.timeZone)
+        return "\(date.formatted(day)) · \(date.formatted(time))"
     }
 
     /// `"≥3★ · 42/137"` for the toolbar's filter badge, or `nil` when no rating filter is active.

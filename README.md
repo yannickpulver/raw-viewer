@@ -20,6 +20,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Filmstrip navigation
 - Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
+- Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers under the info block, click a face to zoom in
 - Video mode (MOV/MP4 playback)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
@@ -61,6 +62,7 @@ python main.py "/path/to/photos"
 | `Shift+R` | Jump to last rated |
 | `R` | Rotate image 90° (view only) |
 | `I` | Toggle info overlay |
+| `F` | Show / hide faces (needs face detection on) |
 | `H` | Toggle help overlay |
 | `J` | Toggle JPEG mode |
 | `M` | Toggle Video mode |

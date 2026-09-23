@@ -69,6 +69,39 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(library.recentFolders.first?.path, root.standardizedFileURL.path)
     }
 
+    func testFaceDetectionSweepsTheFolderOnlyWhileOn() async throws {
+        let faceIndex = FaceIndex(cache: FaceCache(directory: root.appendingPathComponent("face-cache")))
+        library = Library(preferences: Preferences(defaults: defaults),
+                          recents: RecentFolders(defaults: defaults),
+                          summaryStore: summaryStore,
+                          faceIndex: faceIndex)
+        try await seedRawFolder(count: 2)
+        XCTAssertNil(faceIndex.faces(for: library.files[0].url))
+
+        library.faceDetection = true
+        XCTAssertTrue(library.showsFaces)
+        await faceIndex.waitForSweep()
+        // The seeded files are not images, so each one is analysed and has no faces.
+        XCTAssertEqual(library.files.map { faceIndex.faces(for: $0.url) }, [[], []])
+
+        // `F` only hides them; the results stay.
+        library.toggleFaces()
+        XCTAssertFalse(library.showsFaces)
+        XCTAssertNotNil(faceIndex.faces(for: library.files[0].url))
+
+        library.faceDetection = false
+        XCTAssertNil(faceIndex.faces(for: library.files[0].url))
+    }
+
+    func testShowFacesNeedsDetection() async throws {
+        try await seedRawFolder(count: 1)
+        let before = library.showFaces
+        library.toggleFaces()
+        XCTAssertEqual(library.showFaces, before)
+        XCTAssertFalse(library.showsFaces)
+        XCTAssertNotNil(library.snackbar)
+    }
+
     func testEmptyFolderIsNotAddedToRecents() async throws {
         touch("notes.txt")
         try await openAndWait(root)
@@ -438,14 +471,27 @@ final class LibraryTests: XCTestCase {
 
     // MARK: - Overlay text
 
+    func testCaptureDateDropsTheYearOnlyWithinThisYear() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let shot = calendar.date(from: DateComponents(year: 2026, month: 9, day: 20, hour: 11, minute: 50))!
+        let sameYear = calendar.date(from: DateComponents(year: 2026, month: 9, day: 23))!
+        let nextYear = calendar.date(from: DateComponents(year: 2027, month: 1, day: 2))!
+        let german = Locale(identifier: "de_CH")
+        XCTAssertEqual(Library.formatCaptureDate(shot, now: sameYear, locale: german, calendar: calendar),
+                       "So. 20. Sept. · 11:50")
+        XCTAssertEqual(Library.formatCaptureDate(shot, now: nextYear, locale: german, calendar: calendar),
+                       "So. 20. Sept. 2026 · 11:50")
+    }
+
     func testPositionAndInfoText() async throws {
         try await seedRawFolder()
         XCTAssertEqual(library.positionText, "1/4")
         library.rate(3)
         XCTAssertEqual(library.positionText, "2/4")
         library.select(index: 0)
-        XCTAssertTrue(library.infoText.hasPrefix("IMG_0000.cr3  |  "))
-        XCTAssertTrue(library.infoText.hasSuffix("  |  ★★★☆☆"))
+        XCTAssertEqual(library.captureDateText, Library.formatCaptureDate(library.currentFile!.captureDate))
+        XCTAssertEqual(Rating.stars(library.currentRating), "★★★☆☆")
         XCTAssertNil(library.filterBadgeText)
         XCTAssertEqual(library.windowTitle, "RAW Viewer")
     }
