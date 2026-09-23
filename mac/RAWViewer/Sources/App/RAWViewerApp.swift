@@ -53,7 +53,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard NSApp.modalWindow == nil, NSApp.keyWindow != nil else { return event }
             return MainActor.assumeIsolated { self.model.handleKey(event) ? nil : event }
         }
-        model.checkForUpdates()
 
         // Spec 04 §9: trim the disk thumbnail cache back under its budget, once, off-main.
         Task.detached(priority: .background) {

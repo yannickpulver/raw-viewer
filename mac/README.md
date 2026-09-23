@@ -48,7 +48,7 @@ scanning and sidecar I/O happens off the main thread.
 | `rating(for: URL) -> Int`, `currentRating` | ratings; `0` when unknown |
 | `isScanning`, `scanProgressText` | "Scanning folder..." / "Sorting by date... 63%" |
 | `snackbar: SnackbarEvent?` | post-once event with `text` + `durationMs`; call `clearSnackbar()` |
-| `resolveStatus: String?`, `updateAvailable: UpdateInfo?` | Resolve export status, update banner |
+| `resolveStatus: String?` | Resolve export status |
 | `pinnedFile`, `focusedPane`, `isCompareActive` | compare mode |
 | `showInfo`, `filmstripVisible` | persisted overlay toggles |
 | `recentFolders: [URL]` | empty-state recents list |
@@ -136,7 +136,9 @@ Concurrency: 1 current image, 6 nearby previews, 4 thumbnails, 1 full RAW develo
   floating next to the traffic lights: a Back button (same as `Esc`), the mode switcher, the
   subfolder chips as toolbar toggles, and the active rating filter as a compact amber capsule
   (`≥3★ · 1/30`) at the trailing edge. The toolbar drags the window, the position / info
-  block sits below it, and the update banner lives bottom-left next to `?` / `⏱`.
+  block sits below it.
+- Updates come through Sparkle (`AppModel.updater`) instead of the Python app's banner: a
+  dialog offers the new release and installs it, and "Check for Updates…" is in the app menu.
 - The empty-state dashboard shows, per recent folder, the RAW / JPG / MOV counts and the rating
   histogram of the last time that folder was open, cached in
   `~/Library/Application Support/RAW Viewer/folder_summaries.json` (`FolderSummaryStore`).

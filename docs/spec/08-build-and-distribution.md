@@ -180,6 +180,14 @@ Note: the plist path in the zap stanza uses the identifier
 
 ## 7. Update check endpoint
 
+Mac app change (0.5.5): the app uses Sparkle 2. CI signs the release zip with
+`sign_update` (EdDSA, secret `SPARKLE_PRIVATE_KEY`, public key `SUPublicEDKey`
+in `mac/Project.swift`) and attaches a one-item `appcast.xml` to the release.
+`SUFeedURL` points at `releases/latest/download/appcast.xml`. The cask sets
+`auto_updates true`. The private key also lives in the maintainer's login
+keychain under the account `raw-viewer`. The rest of this section describes
+the Python app.
+
 Covered in detail in `01` section 20 and `07` section 10. Summary for the
 distribution side:
 

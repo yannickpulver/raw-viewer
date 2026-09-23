@@ -22,7 +22,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Filter by minimum rating
 - Video mode (MOV/MP4 playback)
 - DaVinci Resolve export with rating metadata
-- Auto-update notifications
+- Auto-updates: new releases are offered in the app and installed with one click
 
 ## Development
 

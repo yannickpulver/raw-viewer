@@ -794,6 +794,12 @@ Note: because the comparison is string inequality, not a semantic version
 compare, a locally built version that is *newer* than the published release also
 shows "Update available". Note: likely unintended.
 
+Mac app change (0.5.5): Sparkle replaces this check and the banner. It reads
+`releases/latest/download/appcast.xml` at launch and every 24h, compares
+`CFBundleVersion` (the CI run number), and shows its own install dialog.
+"Check for Updates…" sits in the app menu. Debug builds don't check. See `08`
+section 7.
+
 ---
 
 ## 21. Reveal in Finder

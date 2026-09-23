@@ -14,6 +14,9 @@ let appVersion: String = {
 
 let project = Project(
     name: "RAWViewer",
+    packages: [
+        .remote(url: "https://github.com/sparkle-project/Sparkle", requirement: .upToNextMajor(from: "2.10.0")),
+    ],
     settings: .settings(
         base: [
             "SWIFT_VERSION": "5",
@@ -36,9 +39,15 @@ let project = Project(
                 "LSMinimumSystemVersion": "15.0",
                 "NSHighResolutionCapable": true,
                 "LSApplicationCategoryType": "public.app-category.photography",
+                // Sparkle: CI attaches a one-item appcast to every release; `latest/download`
+                // always points at the newest one. Compares against `CFBundleVersion`.
+                "SUFeedURL": "https://github.com/yannickpulver/raw-viewer/releases/latest/download/appcast.xml",
+                "SUPublicEDKey": "OHWn0kVxbxpGQaeRP99JWIEVyhOskRRuRZv5NwyzB/E=",
+                "SUEnableAutomaticChecks": true,
             ]),
             sources: ["RAWViewer/Sources/**"],
             resources: ["RAWViewer/Resources/**"],
+            dependencies: [.package(product: "Sparkle")],
             settings: .settings(base: [
                 "SWIFT_VERSION": "5",
                 "SWIFT_STRICT_CONCURRENCY": "minimal",

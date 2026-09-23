@@ -107,28 +107,6 @@ struct FilterBadge: View {
     }
 }
 
-// MARK: - Banners
-
-struct UpdateBanner: View {
-    let info: UpdateInfo
-    var body: some View {
-        Button {
-            NSWorkspace.shared.open(info.url)
-        } label: {
-            Text("Update available: \(info.version)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 10).padding(.vertical, 4)
-                .background(Theme.updateGreen, in: Capsule())
-                .overlay(Capsule().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .pointingHandCursor()
-        // Sits in the bottom-left row, right of the corner buttons, which supply the gap.
-        .padding(.vertical, 10)
-    }
-}
-
 // MARK: - Top-right info block
 
 struct InfoBlock: View {
