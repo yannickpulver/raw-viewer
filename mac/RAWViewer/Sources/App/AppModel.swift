@@ -123,6 +123,7 @@ public final class AppModel {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Move Here"
+        panel.directoryURL = library.currentFile?.url.deletingLastPathComponent() ?? library.folder
         guard panel.runModal() == .OK, let destination = panel.url else { return }
 
         Task {
