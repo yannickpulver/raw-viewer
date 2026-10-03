@@ -21,6 +21,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
 - Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers under the info block, click a face to zoom in
+- Sort oldest first, newest first, or by best faces (most sharp, open-eyed faces first)
 - Video mode (MOV/MP4 playback)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click

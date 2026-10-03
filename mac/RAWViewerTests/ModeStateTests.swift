@@ -114,11 +114,27 @@ final class ModeStateTests: XCTestCase {
         var state = sampleState()
         state.applyFilters(ratings: [:])
         state.index = 1  // b.cr3
-        state.newestFirst = true
+        state.sortOrder = .newestFirst
         state.applyFilters(ratings: [:])
         XCTAssertEqual(state.files.map(\.name), ["d.cr3", "c.cr3", "b.cr3", "a.cr3"])
         XCTAssertEqual(state.currentFile?.name, "b.cr3")
         XCTAssertEqual(state.index, 2)
+    }
+
+    /// Best Faces: highest score first, then no faces, then not analysed; ties keep date order.
+    func testBestFacesSortsByScoreAndKeepsSelection() {
+        var state = sampleState()
+        state.applyFilters(ratings: [:])
+        state.index = 0  // a.cr3
+        state.sortOrder = .bestFaces
+        let urls = state.allFiles.map(\.url)
+        // a: not analysed, b: no faces, c: 0.4, d: 0.9
+        state.applyFilters(ratings: [:], faceScores: [urls[1]: 0, urls[2]: 0.4, urls[3]: 0.9])
+        XCTAssertEqual(state.files.map(\.name), ["d.cr3", "c.cr3", "b.cr3", "a.cr3"])
+        XCTAssertEqual(state.currentFile?.name, "a.cr3")
+
+        state.applyFilters(ratings: [:], faceScores: [urls[1]: 0.5, urls[3]: 0.5])
+        XCTAssertEqual(state.files.map(\.name), ["b.cr3", "d.cr3", "a.cr3", "c.cr3"])
     }
 
     func testRatingClamp() {
@@ -180,7 +196,7 @@ final class ModeStateTests: XCTestCase {
         state.selectOnly(index: 1)   // b.cr3, the anchor
         XCTAssertEqual(state.anchorIndex, 1)
 
-        state.newestFirst = true
+        state.sortOrder = .newestFirst
         state.applyFilters(ratings: [:])
         // Reversed order: d, c, b, a — b.cr3 is now at index 2.
         XCTAssertEqual(state.files.map(\.name), ["d.cr3", "c.cr3", "b.cr3", "a.cr3"])

@@ -12,6 +12,8 @@ public final class FaceIndex {
     public private(set) var faces: [URL: [Face]] = [:]
     /// Files still queued in the current sweep.
     public private(set) var remaining = 0
+    /// Called on the main actor when a sweep has gone through every file, cache hits included.
+    @ObservationIgnored public var onSweepFinished: (() -> Void)?
 
     private let cache: FaceCache
     private let detector = FaceDetector()
@@ -31,6 +33,14 @@ public final class FaceIndex {
     }
 
     public func faces(for url: URL) -> [Face]? { faces[url] }
+
+    /// Per analysed file, the summed quality of its open-eyed faces: more good faces score
+    /// higher. `0` for a file without faces; files not analysed yet are absent.
+    public var scores: [URL: Float] { faces.mapValues(Self.score) }
+
+    static func score(_ faces: [Face]) -> Float {
+        faces.reduce(0) { $0 + ($1.eyesClosed ? 0 : $1.quality ?? 0) }
+    }
 
     /// Starts (or restarts, after a mode switch) the sweep over `files`. Results for a folder
     /// stay in memory until another folder starts or `stop()` runs.
@@ -117,7 +127,10 @@ public final class FaceIndex {
             remaining = queue.count
             scheduleSave()
         }
-        if generation == self.generation, let folder { save(folder: folder) }
+        if generation == self.generation, let folder {
+            save(folder: folder)
+            onSweepFinished?()
+        }
     }
 
     /// At most one write every 5 s while the sweep runs.

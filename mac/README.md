@@ -53,6 +53,7 @@ scanning and sidecar I/O happens off the main thread.
 | `showInfo`, `filmstripVisible`, `showFaces` | persisted overlay toggles |
 | `faceDetection` | persisted, set on the dashboard; while on, every opened folder is swept |
 | `faceIndex: FaceIndex` | face results per URL (`faces(for:)`) |
+| `sortOrder` · `setSortOrder(_:)` | persisted; oldest first, newest first or best faces |
 | `recentFolders: [URL]` | empty-state recents list |
 | `folderSummary(for:) -> FolderSummary?` | cached counts + rating histogram for a recent folder |
 | `scheduler: PreloadScheduler` | images (see below) |
@@ -119,6 +120,8 @@ Concurrency: 1 current image, 6 nearby previews, 4 thumbnails, 1 full RAW develo
   the one on screen first. `F` only shows or hides the result. Results are cached per folder
   in `faces/` under the caches directory, invalidated by mtime. "Eyes closed" is a heuristic on
   the landmark eye contours (`FaceDetector.closedEyeRatio`); Vision has no blink API.
+- Sort "Best Faces" orders by `FaceIndex.scores`: the summed capture quality of the open-eyed
+  faces. Files without faces follow, then files not analysed yet. It re-sorts once when a sweep ends.
 - Caches live in `~/Library/Caches/dev.yannickpulver.rawviewer/`, shoot stats in
   `~/Library/Application Support/RAW Viewer/`. The old `~/.cache/raw-viewer/`
   recents and shoot stats are imported once on first launch.

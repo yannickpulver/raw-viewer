@@ -12,6 +12,14 @@ public enum ComparePane: Sendable {
     case right
 }
 
+/// How the timeline is ordered. Mac app addition — no Python-app equivalent.
+public enum SortOrder: String, Sendable {
+    case oldestFirst
+    case newestFirst
+    /// Most open-eyed, sharp faces first (`FaceIndex.scores`).
+    case bestFaces
+}
+
 /// Per-view-mode state bundle. Spec 01 §2.
 public struct ModeState: Sendable {
     public var allFiles: [MediaFile] = []
@@ -20,13 +28,13 @@ public struct ModeState: Sendable {
     public var ratingFilter: RatingFilter = .all
     public var folderFilter: String?
     public var excludedFolders: Set<String> = []
-    public var newestFirst: Bool = false
+    public var sortOrder: SortOrder = .oldestFirst
 
     /// Multi-select. Mac app addition — no Python-app equivalent. `index` stays the single
     /// current file; `selectedURLs` is the (possibly larger) set drawn with the amber border.
     public var selectedURLs: Set<URL> = []
     /// The file shift-click extends from, stored by URL rather than index so it survives
-    /// `applyFilters` reordering `files` (e.g. `newestFirst` reversing the whole list) — an
+    /// `applyFilters` reordering `files` (e.g. newest-first reversing the whole list) — an
     /// index alone would silently point at the wrong file after a reversal.
     private var anchorURL: URL?
 
@@ -46,9 +54,9 @@ public struct ModeState: Sendable {
         return files[index]
     }
 
-    /// Spec 01 §13: rating filter, then subfolder filter. The previously selected file keeps
-    /// the selection if it survives, otherwise the selection resets to 0.
-    public mutating func applyFilters(ratings: [URL: Int]) {
+    /// Spec 01 §13: rating filter, then subfolder filter, then `sortOrder`. The previously
+    /// selected file keeps the selection if it survives, otherwise the selection resets to 0.
+    public mutating func applyFilters(ratings: [URL: Int], faceScores: [URL: Float] = [:]) {
         let previous = currentFile
         files = allFiles.filter { file in
             let rating = ratings[file.url] ?? 0
@@ -56,7 +64,20 @@ public struct ModeState: Sendable {
             if let folderFilter { return file.subfolder == folderFilter }
             return !excludedFolders.contains(file.subfolder)
         }
-        if newestFirst { files.reverse() }
+        switch sortOrder {
+        case .oldestFirst:
+            break
+        case .newestFirst:
+            files.reverse()
+        case .bestFaces:
+            // Scored files first, then those without faces (0), then those not analysed yet.
+            // `sorted` is not guaranteed stable, so ties fall back to the date order by position.
+            files = files.enumerated().sorted { lhs, rhs in
+                let left = faceScores[lhs.element.url] ?? -1
+                let right = faceScores[rhs.element.url] ?? -1
+                return left != right ? left > right : lhs.offset < rhs.offset
+            }.map(\.element)
+        }
         if let previous, let kept = files.firstIndex(of: previous) {
             index = kept
         } else {

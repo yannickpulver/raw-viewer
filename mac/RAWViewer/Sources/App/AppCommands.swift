@@ -19,6 +19,12 @@ struct AppCommands: Commands {
         "\(text)  (\(key))"
     }
 
+    /// One checkmarked choice of the Sort submenu.
+    private func sortToggle(_ title: String, _ order: SortOrder) -> some View {
+        Toggle(title, isOn: Binding(get: { library.sortOrder == order },
+                                    set: { _ in library.setSortOrder(order) }))
+    }
+
     var body: some Commands {
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { model.checkForUpdates() }
@@ -98,9 +104,16 @@ struct AppCommands: Commands {
                                                                 set: { _ in library.toggleFaces() }))
                 .disabled(!library.faceDetection)
             // Mac app addition: no Python-app equivalent.
-            Toggle("Newest First", isOn: Binding(get: { library.newestFirst },
-                                                  set: { _ in library.toggleNewestFirst() }))
-                .keyboardShortcut("n", modifiers: [.command, .shift])
+            Menu("Sort") {
+                sortToggle("Oldest First", .oldestFirst)
+                // ⇧⌘N keeps flipping between newest and oldest, as the old toggle did.
+                Toggle("Newest First", isOn: Binding(
+                    get: { library.sortOrder == .newestFirst },
+                    set: { library.setSortOrder($0 ? .newestFirst : .oldestFirst) }))
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                sortToggle("Best Faces", .bestFaces)
+                    .disabled(!library.faceDetection)
+            }
             Divider()
             Button(Self.title("Rotate 90°", "R")) { model.rotate() }
                 .disabled(!model.filesLoaded || model.isVideoMode)

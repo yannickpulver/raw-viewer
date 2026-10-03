@@ -506,16 +506,54 @@ final class LibraryTests: XCTestCase {
     }
 
     /// Mac app addition: newest-first reverses the timeline and persists across instances.
-    func testToggleNewestFirstReversesFilesAndPersists() async throws {
+    func testNewestFirstReversesFilesAndPersists() async throws {
         try await seedRawFolder()
         let original = library.files.map(\.name)
-        library.toggleNewestFirst()
-        XCTAssertTrue(library.newestFirst)
+        library.setSortOrder(.newestFirst)
         XCTAssertEqual(library.files.map(\.name), original.reversed())
 
         let second = Library(preferences: Preferences(defaults: defaults),
                              recents: RecentFolders(defaults: defaults))
-        XCTAssertTrue(second.newestFirst)
+        XCTAssertEqual(second.sortOrder, .newestFirst)
+    }
+
+    /// The old Newest First toggle carries over into the sort order.
+    func testLegacyNewestFirstPreferenceMigrates() {
+        defaults.set(true, forKey: Preferences.Keys.newestFirst)
+        XCTAssertEqual(Preferences(defaults: defaults).sortOrder, .newestFirst)
+        defaults.set(false, forKey: Preferences.Keys.newestFirst)
+        XCTAssertEqual(Preferences(defaults: defaults).sortOrder, .oldestFirst)
+    }
+
+    /// Best Faces sorts again once the face sweep is done, and falls back when detection goes off.
+    func testBestFacesResortsWhenTheSweepFinishes() async throws {
+        let cache = FaceCache(directory: root.appendingPathComponent("face-cache"))
+        let faceIndex = FaceIndex(cache: cache)
+        library = Library(preferences: Preferences(defaults: defaults),
+                          recents: RecentFolders(defaults: defaults),
+                          summaryStore: summaryStore,
+                          faceIndex: faceIndex)
+        try await seedRawFolder(count: 4)
+        let files = library.files
+        let rect = CGRect(x: 0.1, y: 0.1, width: 0.2, height: 0.2)
+        func entry(_ file: MediaFile, _ faces: [Face]) throws -> (String, FaceCache.Entry) {
+            (file.url.path, .init(mtime: try XCTUnwrap(FaceCache.mtime(of: file.url)), faces: faces))
+        }
+        cache.save(Dictionary(uniqueKeysWithValues: [
+            try entry(files[0], [Face(rect: rect, quality: 0.3, eyesClosed: false)]),
+            try entry(files[1], [Face(rect: rect, quality: 0.9, eyesClosed: true)]),
+            try entry(files[2], [Face(rect: rect, quality: 0.9, eyesClosed: false)]),
+        ]), folder: try XCTUnwrap(library.folder))
+
+        library.faceDetection = true
+        library.setSortOrder(.bestFaces)
+        await faceIndex.waitForSweep()
+        // files[3] is analysed fresh and has no faces, so it ties with files[1] at 0.
+        XCTAssertEqual(library.files, [files[2], files[0], files[1], files[3]])
+
+        library.faceDetection = false
+        XCTAssertEqual(library.sortOrder, .oldestFirst)
+        XCTAssertEqual(library.files, files)
     }
 
     // MARK: - Shoot stats

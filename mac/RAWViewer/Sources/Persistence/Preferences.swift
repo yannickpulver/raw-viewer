@@ -24,7 +24,9 @@ public final class Preferences {
         public static let filmstripVisible = "filmstripVisible"
         public static let didImportLegacyCache = "didImportLegacyCache"
         public static let recentFolders = "recentFolders"
+        /// Read only to migrate the old Newest First toggle into `sortOrder`.
         public static let newestFirst = "newestFirst"
+        public static let sortOrder = "sortOrder"
         public static let showFaces = "showFaces"
         public static let faceDetection = "faceDetection"
     }
@@ -44,9 +46,14 @@ public final class Preferences {
         set { defaults.set(newValue, forKey: Keys.didImportLegacyCache) }
     }
 
-    public var newestFirst: Bool {
-        get { defaults.bool(forKey: Keys.newestFirst) }
-        set { defaults.set(newValue, forKey: Keys.newestFirst) }
+    public var sortOrder: SortOrder {
+        get {
+            if let raw = defaults.string(forKey: Keys.sortOrder), let order = SortOrder(rawValue: raw) {
+                return order
+            }
+            return defaults.bool(forKey: Keys.newestFirst) ? .newestFirst : .oldestFirst
+        }
+        set { defaults.set(newValue.rawValue, forKey: Keys.sortOrder) }
     }
 
     public var showFaces: Bool {

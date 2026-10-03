@@ -41,7 +41,7 @@ public final class Library {
     public var focusedPane: ComparePane = .right
     public var showInfo: Bool { didSet { preferences.showInfo = showInfo } }
     public var filmstripVisible: Bool { didSet { preferences.filmstripVisible = filmstripVisible } }
-    public var newestFirst: Bool { didSet { preferences.newestFirst = newestFirst } }
+    public private(set) var sortOrder: SortOrder { didSet { preferences.sortOrder = sortOrder } }
     /// Set on the dashboard, for every folder: while on, `faceIndex` sweeps each folder opened.
     public var faceDetection: Bool {
         didSet {
@@ -49,6 +49,8 @@ public final class Library {
             // Turning detection on should show something right away.
             if faceDetection { showFaces = true }
             refreshFaceIndex()
+            // Without detection there are no scores to sort by.
+            if !faceDetection, sortOrder == .bestFaces { setSortOrder(.oldestFirst) }
         }
     }
     /// `F`: face boxes on the canvas plus the face crops. Display only; detection keeps running.
@@ -131,7 +133,7 @@ public final class Library {
         self.faceIndex = faceIndex ?? FaceIndex()
         self.showInfo = preferences.showInfo
         self.filmstripVisible = preferences.filmstripVisible
-        self.newestFirst = preferences.newestFirst
+        self.sortOrder = preferences.sortOrder
         self.showFaces = preferences.showFaces
         self.faceDetection = preferences.faceDetection
         recents.importLegacyIfNeeded(preferences: preferences)
@@ -140,6 +142,7 @@ public final class Library {
             self.ratings[url] = rating
             self.ratingsRevision &+= 1
         }
+        self.faceIndex.onSweepFinished = { [weak self] in self?.resortByFaces() }
     }
 
     // MARK: - Derived accessors
@@ -237,8 +240,8 @@ public final class Library {
         for kind in MediaKind.allCases {
             var modeState = ModeState()
             modeState.allFiles = result.files(for: kind)
-            modeState.newestFirst = newestFirst
-            modeState.applyFilters(ratings: ratings)
+            modeState.sortOrder = sortOrder
+            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
             states[kind] = modeState
         }
         modeStates = states
@@ -505,28 +508,42 @@ public final class Library {
         if value != 0 { await loadAllRatings() }
         scheduler.stopBackgroundSweep()
         state.ratingFilter = RatingFilter(value)
-        state.applyFilters(ratings: ratings)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
         afterFilterChange()
     }
 
     public func setFolderFilter(_ name: String?) {
         scheduler.stopBackgroundSweep()
         state.folderFilter = name
-        state.applyFilters(ratings: ratings)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
         afterFilterChange()
     }
 
-    /// Mac app addition: no Python-app equivalent. Flips newest-first for every mode's timeline,
-    /// keeping the current selection where it survives. Persists even with no folder loaded.
-    public func toggleNewestFirst() {
-        newestFirst.toggle()
+    /// Mac app addition: no Python-app equivalent. Reorders every mode's timeline, keeping the
+    /// current selection where it survives. Persists even with no folder loaded.
+    public func setSortOrder(_ order: SortOrder) {
+        guard order != sortOrder else { return }
+        sortOrder = order
+        let scores = faceIndex.scores
         for kind in MediaKind.allCases {
             var modeState = modeStates[kind] ?? ModeState()
-            modeState.newestFirst = newestFirst
-            modeState.applyFilters(ratings: ratings)
+            modeState.sortOrder = order
+            modeState.applyFilters(ratings: ratings, faceScores: scores)
             modeStates[kind] = modeState
         }
         scheduler.stopBackgroundSweep()
+        afterFilterChange()
+    }
+
+    /// A finished face sweep brings scores for files that had none, so Best Faces sorts again.
+    /// Only when the order actually changes, since `afterFilterChange` drops the thumbnails.
+    private func resortByFaces() {
+        guard sortOrder == .bestFaces else { return }
+        var resorted = state
+        resorted.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+        guard resorted.files != files else { return }
+        scheduler.stopBackgroundSweep()
+        state = resorted
         afterFilterChange()
     }
 
@@ -535,7 +552,7 @@ public final class Library {
         var excluded = state.excludedFolders
         if excluded.contains(folderName) { excluded.remove(folderName) } else { excluded.insert(folderName) }
         state.excludedFolders = excluded
-        state.applyFilters(ratings: ratings)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
         afterFilterChange()
     }
 

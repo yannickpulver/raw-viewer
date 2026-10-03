@@ -181,6 +181,18 @@ final class FaceIndexTests: XCTestCase {
         XCTAssertNil(index.faces(for: url))
     }
 
+    /// Open-eyed faces add their quality; closed eyes and missing quality add nothing.
+    func testScoreSumsOpenEyedFaces() {
+        let rect = CGRect(x: 0, y: 0, width: 0.1, height: 0.1)
+        XCTAssertEqual(FaceIndex.score([]), 0)
+        XCTAssertEqual(FaceIndex.score([
+            Face(rect: rect, quality: 0.5, eyesClosed: false),
+            Face(rect: rect, quality: 0.25, eyesClosed: false),
+            Face(rect: rect, quality: 0.9, eyesClosed: true),
+            Face(rect: rect, quality: nil, eyesClosed: false),
+        ]), 0.75)
+    }
+
     func testStopForgetsTheFolder() async {
         let image = file("a.cr3")
         let index = FaceIndex(cache: FaceCache(directory: cacheDirectory))
