@@ -21,6 +21,12 @@ final class CanvasNSView: NSView {
     /// Identity of what is displayed, so `updateNSView` stays idempotent.
     private(set) var displayedImage: CGImage?
     private(set) var displayedURL: URL?
+    /// Full-resolution pixels for `displayedURL`, loaded once zooming magnifies the preview.
+    /// Only the layer's contents change; its bounds stay in preview pixels, so every bit of
+    /// zoom, pan and face geometry is unaffected.
+    private var hiResImage: CGImage?
+    private var hiResRequestedURL: URL?
+    private var hiResTask: Task<Void, Never>?
 
     private(set) var zoom: Double = 1.0
     private var rotationSteps: Int = 0
@@ -62,6 +68,10 @@ final class CanvasNSView: NSView {
         if !sameURL {
             // Spec 01 §15: a new image clears rotation. Zoom and pan are kept (spec 01 §16).
             rotationSteps = 0
+            hiResTask?.cancel()
+            hiResTask = nil
+            hiResImage = nil
+            hiResRequestedURL = nil
         }
         displayedImage = image
         displayedURL = url
@@ -70,7 +80,7 @@ final class CanvasNSView: NSView {
         CATransaction.setDisableActions(true)
         if let image {
             imageLayer.isHidden = false
-            imageLayer.contents = image
+            imageLayer.contents = hiResImage ?? image
             imageLayer.bounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         } else {
             imageLayer.isHidden = true
@@ -195,6 +205,31 @@ final class CanvasNSView: NSView {
         for box in faceLayer.sublayers ?? [] { box.borderWidth = 1.5 / max(scale, 0.0001) }
         imageLayer.position = CGPoint(x: bounds.midX + offset.x, y: bounds.midY + offset.y)
         CATransaction.commit()
+        loadHiResIfMagnified()
+    }
+
+    /// Once a preview pixel covers more than one screen pixel, decode the whole file. Waits a
+    /// moment first so holding an arrow key through a zoomed-in burst decodes only where it stops.
+    private func loadHiResIfMagnified() {
+        guard !isAtFit, let image = displayedImage, let url = displayedURL,
+              hiResRequestedURL != url, let kind = MediaKind.of(url) else { return }
+        let backing = window?.backingScaleFactor ?? 2
+        guard fitScale * CGFloat(zoom) * backing > 1 else { return }
+        hiResRequestedURL = url
+        let longEdge = max(image.width, image.height)
+        hiResTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            let decoded = await Task.detached(priority: .userInitiated) {
+                PreviewDecoder().fullResolution(url: url, kind: kind, largerThan: longEdge)
+            }.value
+            guard let self, !Task.isCancelled, self.displayedURL == url, let decoded else { return }
+            self.hiResImage = decoded
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            self.imageLayer.contents = decoded
+            CATransaction.commit()
+        }
     }
 
     override func layout() {
