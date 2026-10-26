@@ -712,6 +712,7 @@ Applies to `ZoomableImageView` (`viewer.py:48`).
 | `Space` toggle | at fit → jump to 2.0x; otherwise → back to fit | `viewer.py:128` |
 | Double-click | always back to fit | `viewer.py:204` |
 | Reset on navigate | no — the Swift app keeps zoom and pan across images (only rotation resets); the Python app re-fit on every `set_pixmap` | `CanvasView.swift` |
+| Full resolution | Swift app only: once a preview pixel covers more than one screen pixel, the whole file is decoded (150 ms after the last navigation) and swapped in. RAWs keep an embedded preview of at least 90 % sensor size, otherwise they get a full `CIRAWFilter` develop | `CanvasView.swift`, `PreviewDecoder.swift` |
 | Pinch | `factor = 1.0 + gesture.value()`, anchored at the gesture position | `viewer.py:157` |
 | Mouse drag | left button pans by the raw pixel delta; cursor becomes a closed hand | `viewer.py:180` |
 | Two-finger scroll while at fit | horizontal only, navigates images when `abs(dx) > 30` | `viewer.py:168` |

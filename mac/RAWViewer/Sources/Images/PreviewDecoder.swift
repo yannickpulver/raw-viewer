@@ -42,16 +42,37 @@ public struct PreviewDecoder: Sendable {
 
     /// Full RAW develop through `CIRAWFilter`, half size, capped at 2560 px, sRGB output.
     public func fullDevelop(url: URL) -> CGImage? {
+        develop(url: url, draft: true, maxPixelSize: Self.previewMaxPixelSize)
+    }
+
+    /// Every pixel of the file, for zooming in past the preview. `nil` when the file has no
+    /// more pixels than `longEdge`. A RAW whose embedded preview is (nearly) sensor size keeps
+    /// that preview and with it the camera's look; otherwise it gets a full develop.
+    public func fullResolution(url: URL, kind: MediaKind, largerThan longEdge: Int) -> CGImage? {
+        guard kind != .video,
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int else { return nil }
+        let sourceEdge = max(width, height)
+        guard sourceEdge > longEdge else { return nil }
+        let embedded = thumbnail(url: url, kind: kind, maxPixelSize: sourceEdge)
+        if kind == .jpeg { return embedded }
+        if let embedded, Double(max(embedded.width, embedded.height)) >= Double(sourceEdge) * 0.9 {
+            return embedded
+        }
+        return develop(url: url, draft: false, maxPixelSize: nil)
+    }
+
+    private func develop(url: URL, draft: Bool, maxPixelSize: Int?) -> CGImage? {
         guard let filter = CIRAWFilter(imageURL: url) else { return nil }
-        filter.isDraftModeEnabled = true
+        filter.isDraftModeEnabled = draft
         guard let output = filter.outputImage else { return nil }
 
         let extent = output.extent
         guard extent.width > 0, extent.height > 0 else { return nil }
         let longEdge = max(extent.width, extent.height)
-        let scale = longEdge > CGFloat(Self.previewMaxPixelSize)
-            ? CGFloat(Self.previewMaxPixelSize) / longEdge
-            : 1.0
+        let scale = maxPixelSize.map { longEdge > CGFloat($0) ? CGFloat($0) / longEdge : 1.0 } ?? 1.0
         let scaled = scale < 1.0 ? output.transformed(by: .init(scaleX: scale, y: scale)) : output
 
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
