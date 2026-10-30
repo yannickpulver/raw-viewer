@@ -340,6 +340,41 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(library.index, 1, "RAW selection survived the round trip")
     }
 
+    func testAllModeMergesEveryKindInDateOrder() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        for (offset, name) in ["c.mov", "a.cr3", "d.jpg", "b.cr3"].enumerated() {
+            let date = start.addingTimeInterval(Double(offset))
+            try FileManager.default.setAttributes([.creationDate: date, .modificationDate: date],
+                                                  ofItemAtPath: touch(name).path)
+        }
+        try await openAndWait(root)
+        XCTAssertTrue(library.modeButtonVisible(.all))
+        XCTAssertEqual(library.modeButtonLabel(.all), "ALL (4)")
+
+        library.switchViewMode(.all, toggle: true)
+        XCTAssertEqual(library.viewMode, .all)
+        XCTAssertEqual(library.files.map(\.name), ["c.mov", "a.cr3", "d.jpg", "b.cr3"])
+
+        // Compare refuses a video, even inside ALL.
+        library.toggleCompare()
+        XCTAssertFalse(library.isCompareActive)
+        library.select(index: 1)
+        library.toggleCompare()
+        XCTAssertTrue(library.isCompareActive)
+
+        library.switchViewMode(.all, toggle: true)
+        XCTAssertEqual(library.viewMode, .raw)
+    }
+
+    func testAllModeNeedsTwoKinds() async throws {
+        try await seedRawFolder()
+        XCTAssertFalse(library.modeButtonVisible(.all))
+        library.switchViewMode(.all, toggle: true)
+        XCTAssertEqual(library.viewMode, .raw)
+        library.switchViewMode(.all, toggle: false)
+        XCTAssertEqual(library.viewMode, .raw)
+    }
+
     func testToggleGridExitsCompare() async throws {
         try await seedRawFolder()
         library.toggleCompare()

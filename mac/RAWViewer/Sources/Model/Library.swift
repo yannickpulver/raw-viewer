@@ -22,12 +22,10 @@ public final class Library {
     // MARK: - State
 
     public private(set) var folder: URL?
-    public private(set) var viewMode: MediaKind = .raw
+    public private(set) var viewMode: ViewMode = .raw
     public private(set) var displayMode: DisplayMode = .single
-    public private(set) var modeStates: [MediaKind: ModeState] = [
-        .raw: ModeState(), .jpeg: ModeState(), .video: ModeState(),
-    ]
-    /// Shared across all three modes and keyed by URL (deliberate deviation from spec 03 §9,
+    public private(set) var modeStates = Library.emptyModeStates
+    /// Shared across all modes and keyed by URL (deliberate deviation from spec 03 §9,
     /// where ratings were keyed by index into the per-mode unfiltered list).
     public private(set) var ratings: [URL: Int] = [:]
     /// Bumped on every ratings mutation so views that draw rating badges repaint even when
@@ -147,6 +145,10 @@ public final class Library {
 
     // MARK: - Derived accessors
 
+    private static var emptyModeStates: [ViewMode: ModeState] {
+        Dictionary(uniqueKeysWithValues: ViewMode.allCases.map { ($0, ModeState()) })
+    }
+
     public var state: ModeState {
         get { modeStates[viewMode] ?? ModeState() }
         set { modeStates[viewMode] = newValue }
@@ -236,13 +238,13 @@ public final class Library {
         pinnedFile = nil
         focusedPane = .right
 
-        var states: [MediaKind: ModeState] = [:]
-        for kind in MediaKind.allCases {
+        var states: [ViewMode: ModeState] = [:]
+        for mode in ViewMode.allCases {
             var modeState = ModeState()
-            modeState.allFiles = result.files(for: kind)
+            modeState.allFiles = result.files(for: mode)
             modeState.sortOrder = sortOrder
             modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
-            states[kind] = modeState
+            states[mode] = modeState
         }
         modeStates = states
         selectionRevision &+= 1
@@ -283,7 +285,7 @@ public final class Library {
         faceIndex.stop()
         pinnedFile = nil
         focusedPane = .right
-        modeStates = [.raw: ModeState(), .jpeg: ModeState(), .video: ModeState()]
+        modeStates = Self.emptyModeStates
         ratings.removeAll()
         ratingsRevision &+= 1
         selectionRevision &+= 1
@@ -482,7 +484,7 @@ public final class Library {
     /// Whole-folder rating sweep, off the main thread, batched. Spec 05 §7.
     public func loadAllRatings() async {
         guard !ratingsFullyLoaded else { return }
-        let urls = MediaKind.allCases.flatMap { modeStates[$0]?.allFiles.map(\.url) ?? [] }
+        let urls = modeStates[.all]?.allFiles.map(\.url) ?? []
         guard !urls.isEmpty else {
             ratingsFullyLoaded = true
             return
@@ -525,11 +527,11 @@ public final class Library {
         guard order != sortOrder else { return }
         sortOrder = order
         let scores = faceIndex.scores
-        for kind in MediaKind.allCases {
-            var modeState = modeStates[kind] ?? ModeState()
+        for mode in ViewMode.allCases {
+            var modeState = modeStates[mode] ?? ModeState()
             modeState.sortOrder = order
             modeState.applyFilters(ratings: ratings, faceScores: scores)
-            modeStates[kind] = modeState
+            modeStates[mode] = modeState
         }
         scheduler.stopBackgroundSweep()
         afterFilterChange()
@@ -565,22 +567,24 @@ public final class Library {
 
     // MARK: - Modes
 
-    /// `toggle: true` is the `J` / `M` key semantics (pressing it again returns to RAW).
+    /// `toggle: true` is the `J` / `M` / `A` key semantics (pressing it again returns to RAW).
     /// `toggle: false` is the mode-button semantics: a direct switch that is ignored when the
     /// target mode is empty. Spec 01 §4, §19.
-    public func switchViewMode(_ kind: MediaKind, toggle: Bool) {
-        var target = kind
+    public func switchViewMode(_ mode: ViewMode, toggle: Bool) {
+        var target = mode
         if toggle {
-            if viewMode == kind {
+            if viewMode == mode {
                 target = .raw
-            } else if kind == .jpeg, viewMode == .raw,
+            } else if mode == .jpeg, viewMode == .raw,
                       modeStates[.jpeg]?.allFiles.isEmpty ?? true {
                 // Spec 01 §19: the guard only fires when leaving RAW — kept as shipped.
                 post(SnackbarEvent(text: "No JPEG files found in this folder", durationMs: 2000))
                 return
+            } else if mode == .all, !modeButtonVisible(.all) {
+                return
             }
         } else {
-            guard !(modeStates[kind]?.files.isEmpty ?? true) else { return }
+            guard modeButtonVisible(mode) else { return }
         }
         guard target != viewMode else { return }
         exitCompare()
@@ -605,13 +609,13 @@ public final class Library {
 
     // MARK: - Compare
 
-    /// Spec 01 §9: unavailable in video mode and with no files.
+    /// Spec 01 §9: unavailable on a video and with no files.
     public func toggleCompare() {
         if isCompareActive {
             exitCompare()
             return
         }
-        guard viewMode != .video, let current = currentFile else { return }
+        guard let current = currentFile, current.kind != .video else { return }
         pinnedFile = current
         focusedPane = .right
     }
@@ -644,8 +648,8 @@ public final class Library {
 
     /// Faces show in the single view only; grid, compare and video keep their own chrome.
     public var showsFaces: Bool {
-        faceDetection && showFaces && !files.isEmpty && displayMode == .single && !isCompareActive
-            && viewMode != .video
+        faceDetection && showFaces && displayMode == .single && !isCompareActive
+            && currentFile.map { $0.kind != .video } ?? false
     }
 
     /// Faces are for stills only; video mode and detection turned off stop the sweep.
@@ -844,10 +848,8 @@ public final class Library {
     public func currentFolderSummary() -> FolderSummary? {
         guard folder != nil, hasLoadedFolder else { return nil }
         var histogram: [Int: Int] = [:]
-        for kind in MediaKind.allCases {
-            for file in modeStates[kind]?.allFiles ?? [] {
-                histogram[rating(for: file.url), default: 0] += 1
-            }
+        for file in modeStates[.all]?.allFiles ?? [] {
+            histogram[rating(for: file.url), default: 0] += 1
         }
         return FolderSummary(raw: modeStates[.raw]?.allFiles.count ?? 0,
                              jpeg: modeStates[.jpeg]?.allFiles.count ?? 0,
@@ -961,13 +963,17 @@ public final class Library {
     }
 
     /// `"RAW (137)"`, or the bare label when that mode has no files (the button is then hidden).
-    public func modeButtonLabel(_ kind: MediaKind) -> String {
-        let count = modeStates[kind]?.files.count ?? 0
-        return count > 0 ? "\(kind.buttonLabel) (\(count))" : kind.buttonLabel
+    public func modeButtonLabel(_ mode: ViewMode) -> String {
+        let count = modeStates[mode]?.files.count ?? 0
+        return count > 0 ? "\(mode.buttonLabel) (\(count))" : mode.buttonLabel
     }
 
-    public func modeButtonVisible(_ kind: MediaKind) -> Bool {
-        (modeStates[kind]?.files.count ?? 0) > 0
+    /// `ALL` only earns its button once it mixes at least two kinds; with one it would just
+    /// repeat that kind's button.
+    public func modeButtonVisible(_ mode: ViewMode) -> Bool {
+        guard mode == .all else { return (modeStates[mode]?.files.count ?? 0) > 0 }
+        let kinds = Set(modeStates[.all]?.files.map(\.kind) ?? [])
+        return kinds.count > 1
     }
 
     /// Chips render only when there is more than one distinct subfolder. Spec 03 §7.

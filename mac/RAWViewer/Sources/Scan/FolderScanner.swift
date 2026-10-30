@@ -10,8 +10,9 @@ public struct ScanResult: Sendable {
 
     public var isEmpty: Bool { raw.isEmpty && jpeg.isEmpty && video.isEmpty }
 
-    public func files(for kind: MediaKind) -> [MediaFile] {
-        switch kind {
+    public func files(for mode: ViewMode) -> [MediaFile] {
+        switch mode {
+        case .all: return FolderScanner.sorted(raw + jpeg + video)
         case .raw: return raw
         case .jpeg: return jpeg
         case .video: return video
