@@ -116,13 +116,15 @@ struct AppCommands: Commands {
             }
             Divider()
             Button(Self.title("Rotate 90°", "R")) { model.rotate() }
-                .disabled(!model.filesLoaded || model.isVideoMode)
-            Button(Self.title(model.isVideoMode ? "Play / Pause" : "Zoom 2x", "Space")) {
+                .disabled(!model.filesLoaded || model.showsVideo)
+            Button(Self.title(model.showsVideo ? "Play / Pause" : "Zoom 2x", "Space")) {
                 model.toggleSpace()
             }
             Divider()
             Button(Self.title("Toggle RAW / JPEG Mode", "J")) { library.switchViewMode(.jpeg, toggle: true) }
             Button(Self.title("Toggle Video Mode", "M")) { library.switchViewMode(.video, toggle: true) }
+            // Mac app addition: no Python-app equivalent.
+            Button(Self.title("Toggle All Files Mode", "A")) { library.switchViewMode(.all, toggle: true) }
         }
 
         CommandGroup(replacing: .help) {

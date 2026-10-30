@@ -176,9 +176,8 @@ public final class PreloadScheduler {
 
     // MARK: - Nearby previews
 
-    /// Preloads ±6 around `index` in the spec's exact offset order. Skipped in video mode.
+    /// Preloads ±6 around `index` in the spec's exact offset order. Videos have no preview.
     public func preloadNearby(index: Int, in files: [MediaFile]) {
-        guard let kind = files.first?.kind, kind != .video else { return }
         var wanted: Set<URL> = []
         if index >= 0 && index < files.count { wanted.insert(files[index].url) }
         for offset in Self.nearbyOffsets {
@@ -196,7 +195,7 @@ public final class PreloadScheduler {
             let target = index + offset
             guard target >= 0, target < files.count else { continue }
             let file = files[target]
-            guard !previews.contains(file.url) else { continue }
+            guard file.kind != .video, !previews.contains(file.url) else { continue }
             let key = TaskKey(url: file.url, size: 0)
             guard tasks[key] == nil else { continue }
             schedulePreview(file, gate: previewGate, key: key)

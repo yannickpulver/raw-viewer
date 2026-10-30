@@ -41,7 +41,8 @@ public final class AppModel {
     private init() {}
 
     var filesLoaded: Bool { !library.files.isEmpty }
-    var isVideoMode: Bool { library.viewMode == .video }
+    /// The current file is a video: in MOV mode, or a clip inside ALL.
+    var showsVideo: Bool { library.currentFile?.kind == .video }
     var isGrid: Bool { library.displayMode == .grid }
 
     // MARK: - Folder opening
@@ -72,7 +73,7 @@ public final class AppModel {
     // MARK: - Actions
 
     func rotate() {
-        guard filesLoaded, !isVideoMode else { return }
+        guard filesLoaded, !showsVideo else { return }
         if library.isCompareActive, library.focusedPane == .left {
             compareRotationToken += 1
         } else {
@@ -85,9 +86,9 @@ public final class AppModel {
         faceFocusToken += 1
     }
 
-    /// Spec 02 §1: `Space` is play/pause in video mode, 2x zoom otherwise.
+    /// Spec 02 §1: `Space` is play/pause on a video, 2x zoom otherwise.
     func toggleSpace() {
-        if isVideoMode { video.togglePlay() } else { zoomToken += 1 }
+        if showsVideo, !library.isCompareActive { video.togglePlay() } else { zoomToken += 1 }
     }
 
     /// Spec 02 §1-2, plus the mac app's overlays and multi-selection: help → stats →
@@ -258,6 +259,7 @@ public final class AppModel {
         case "o": if filesLoaded { library.revealInFinder() }; return true
         case "j": library.switchViewMode(.jpeg, toggle: true); return true
         case "m": library.switchViewMode(.video, toggle: true); return true
+        case "a": library.switchViewMode(.all, toggle: true); return true
         case "h": showHelp.toggle(); return true
         case "t": showStats.toggle(); return true
         default: return false

@@ -12,7 +12,7 @@ struct MainToolbar: ToolbarContent {
     var library: Library { model.library }
 
     private var anyModeHasFiles: Bool {
-        MediaKind.allCases.contains { library.modeButtonVisible($0) }
+        ViewMode.allCases.contains { library.modeButtonVisible($0) }
     }
 
     var body: some ToolbarContent {
@@ -67,16 +67,16 @@ struct MainToolbar: ToolbarContent {
         // The setter routes through `switchViewMode(_:toggle: false)`, which is the
         // mode-button semantics: a direct switch that is ignored for an empty mode.
         // Modes with no files have no segment at all, so they cannot be picked.
-        let mode = Binding<MediaKind>(
+        let mode = Binding<ViewMode>(
             get: { library.viewMode },
             set: { library.switchViewMode($0, toggle: false) })
 
         // Default control size: the toolbar styles a regular segmented picker as its own item;
         // a `.small` one ends up as a second bezel floating inside the item's backing.
         return Picker("View mode", selection: mode) {
-            ForEach(MediaKind.allCases, id: \.self) { kind in
-                if library.modeButtonVisible(kind) {
-                    Text(library.modeButtonLabel(kind)).tag(kind)
+            ForEach(ViewMode.allCases, id: \.self) { mode in
+                if library.modeButtonVisible(mode) {
+                    Text(library.modeButtonLabel(mode)).tag(mode)
                 }
             }
         }
@@ -329,6 +329,7 @@ struct HelpOverlay: View {
 
       J            Toggle RAW/JPEG mode
       M            Toggle Video mode
+      A            Toggle All files mode
       Space        Play/Pause video
       I            Toggle info overlay
       ⌘S          Toggle filmstrip

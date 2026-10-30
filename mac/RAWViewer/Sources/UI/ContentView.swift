@@ -55,6 +55,7 @@ struct ContentView: View {
         }
         .onChange(of: library.currentFile?.url) { _, _ in syncVideo() }
         .onChange(of: library.viewMode) { _, _ in syncVideo() }
+        .onChange(of: library.isCompareActive) { _, _ in syncVideo() }
         .onChange(of: library.displayMode) { _, new in
             if new == .grid { model.video.pause() }
         }
@@ -84,8 +85,6 @@ struct ContentView: View {
         let files = library.files
         if library.displayMode == .grid, !files.isEmpty {
             gridPane
-        } else if library.viewMode == .video, !files.isEmpty {
-            VideoPane(controller: model.video)
         } else if files.isEmpty {
             if library.isScanning {
                 Color.black
@@ -99,6 +98,8 @@ struct ContentView: View {
             }
         } else if library.isCompareActive {
             comparePanes
+        } else if model.showsVideo {
+            VideoPane(controller: model.video)
         } else {
             singleCanvas
         }
@@ -207,8 +208,9 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
+    /// Compare shows a video's poster frame only, so it never plays one.
     private func syncVideo() {
-        if library.viewMode == .video, let file = library.currentFile, file.kind == .video {
+        if model.showsVideo, !library.isCompareActive, let file = library.currentFile {
             model.video.open(file.url)
         } else {
             model.video.stop()

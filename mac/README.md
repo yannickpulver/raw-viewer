@@ -81,7 +81,7 @@ scanning and sidecar I/O happens off the main thread.
 | `setRatingFilter(_ value: Int) async` | `Cmd+0`–`5` / filter buttons; loads ratings when non-zero |
 | `setFolderFilter(_ name: String?)` | subfolder chip click |
 | `toggleExcluded(_ folder: String)` | chip right-click |
-| `switchViewMode(_ kind:toggle:)` | `toggle: true` = `J`/`M`, `toggle: false` = mode buttons |
+| `switchViewMode(_ mode:toggle:)` | `toggle: true` = `J`/`M`/`A`, `toggle: false` = mode buttons |
 | `toggleGrid()` · `toggleCompare()` · `focusPane(_:)` · `exitCompare()` | display / compare |
 | `toggleInfo()` · `toggleFilmstrip()` · `toggleFaces()` | `I`, `Cmd+S`, `F` |
 | `moveRejected() async -> String?` | returns the alert prompt, or `nil` (snackbar already posted) |
