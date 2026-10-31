@@ -28,6 +28,7 @@ struct ContentView: View {
             if showFilmstrip {
                 FilmstripView(
                     model: FilmstripModel(files: files, index: index, ratings: ratings,
+                                          scenes: library.scenes,
                                           thumbRevision: thumbRevision,
                                           ratingsRevision: library.ratingsRevision,
                                           isSelected: { library.isSelected(index: $0) },
@@ -143,6 +144,7 @@ struct ContentView: View {
         let scheduler = library.scheduler
         return GridView(
             model: GridModel(files: library.files, index: library.index, ratings: library.ratings,
+                             scenes: library.scenes,
                              thumbRevision: scheduler.thumbs80.count &+ scheduler.thumbs200.count,
                              ratingsRevision: library.ratingsRevision,
                              isSelected: { library.isSelected(index: $0) },

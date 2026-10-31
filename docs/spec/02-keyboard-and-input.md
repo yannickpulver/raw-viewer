@@ -73,7 +73,9 @@ rating filter to "unrated only" (see spec 01 §13); `M` with `Shift+Cmd` opens
 commands, not part of the single key dispatcher table above. `N` with
 `Shift+Cmd` toggles the "Newest First" View-menu option, a persisted
 (UserDefaults) preference that reverses the per-mode timeline order (oldest-
-first is the default) while keeping the current file selected.
+first is the default) while keeping the current file selected. `S` with
+`Shift` toggles Group by Scene, and in the single view `↓` / `↑` jump to the
+next / previous scene while scenes are grouped (spec 01 §8 addendum).
 
 ### Bindings with no modifier check
 

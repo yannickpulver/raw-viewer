@@ -28,6 +28,8 @@ enum Theme {
     static let filmstripHeight: CGFloat = 124
     static let thumbSize: CGFloat = 80
     static let thumbStride: CGFloat = 84
+    /// Extra space between two scenes in the filmstrip while scenes are grouped.
+    static let sceneGap: CGFloat = 16
     static let faceThumbSize: CGFloat = 64
 }
 

@@ -6,6 +6,8 @@ struct FilmstripModel {
     var files: [MediaFile]
     var index: Int
     var ratings: [URL: Int]
+    /// `nil` while scenes are not grouped: one unbroken strip.
+    var scenes: Scenes?
     /// Bumped whenever a thumbnail lands, so the strip repaints.
     var thumbRevision: Int
     /// Bumped on every ratings mutation. `ratings.count` is not enough: re-rating the file that
@@ -88,6 +90,7 @@ final class FilmstripScroller: NSScroller {
 final class FilmstripContentView: NSView {
 
     var model: FilmstripModel?
+    var layout = StripLayout(scenes: Scenes(total: 0), stride: Theme.thumbStride)
     var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     /// Kept alive across the popup and any share sheet it opens. See `SelectionMenuController`.
     private var selectionMenuController: SelectionMenuController?
@@ -102,15 +105,22 @@ final class FilmstripContentView: NSView {
         context.setFillColor(NSColor(white: 20.0 / 255.0, alpha: 1).cgColor)
         context.fill(bounds)
 
-        let stride = Theme.thumbStride
         let cell = Theme.thumbSize
-        let first = max(0, Int(floor(dirtyRect.minX / stride)))
-        let last = min(model.files.count - 1, Int(ceil(dirtyRect.maxX / stride)))
-        guard first <= last else { return }
+        let range = layout.range(minX: dirtyRect.minX, maxX: dirtyRect.maxX)
+        guard !range.isEmpty else { return }
 
-        for i in first...last {
+        // A hairline in the middle of each gap marks where a scene starts.
+        if let scenes = model.scenes {
+            context.setFillColor(NSColor(white: 1, alpha: 0.18).cgColor)
+            for scene in scenes.scene(of: range.lowerBound)...scenes.scene(of: range.upperBound - 1) where scene > 0 {
+                let x = layout.x(of: scenes.starts[scene]) - (layout.gap + layout.stride - cell) / 2
+                context.fill(CGRect(x: x, y: 10, width: 1, height: cell - 12))
+            }
+        }
+
+        for i in range {
             let file = model.files[i]
-            let x = CGFloat(i) * stride
+            let x = layout.x(of: i)
             let y: CGFloat = 4
 
             context.setFillColor(NSColor(white: 40.0 / 255.0, alpha: 1).cgColor)
@@ -164,10 +174,10 @@ final class FilmstripContentView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard let model else { return }
+        guard model != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let index = Int(floor(point.x / Theme.thumbStride))
-        guard index >= 0, index < model.files.count else { return }
+        let index = layout.index(atX: point.x)
+        guard index >= 0 else { return }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // AppKit delivers a control-click as `mouseDown` with `.control` set, not as
         // `rightMouseDown` — that is the standard right-click on a one-button mouse or
@@ -182,10 +192,10 @@ final class FilmstripContentView: NSView {
     /// Right-click on an already-selected cell acts on the whole selection; otherwise the
     /// click first collapses the selection to that cell. Spec: mac app addition.
     override func rightMouseDown(with event: NSEvent) {
-        guard let model else { return }
+        guard model != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let index = Int(floor(point.x / Theme.thumbStride))
-        guard index >= 0, index < model.files.count else { return }
+        let index = layout.index(atX: point.x)
+        guard index >= 0 else { return }
         openMenu(at: index, point: point)
     }
 
@@ -199,7 +209,7 @@ final class FilmstripContentView: NSView {
             urls = [model.files[index].url]
         }
 
-        let x = CGFloat(index) * Theme.thumbStride
+        let x = layout.x(of: index)
         let rect = NSRect(x: x, y: 4, width: Theme.thumbSize, height: Theme.thumbSize)
         let controller = SelectionMenuController(urls: urls, view: self, rect: rect)
         selectionMenuController = controller
@@ -228,6 +238,7 @@ struct FilmstripView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var onVisibleRange: ((Range<Int>) -> Void)?
+        var layout = StripLayout(scenes: Scenes(total: 0), stride: Theme.thumbStride)
         var debounce: Timer?
         var lastIndex: Int = -1
         var lastRevision: Int = -1
@@ -244,11 +255,11 @@ struct FilmstripView: NSViewRepresentable {
 
         func schedule(visible: NSRect) {
             debounce?.invalidate()
+            let layout = self.layout
             let timer = Timer(timeInterval: 0.05, repeats: false) { [weak self] _ in
-                let first = max(0, Int(floor(visible.minX / Theme.thumbStride)))
-                let last = Int(ceil(visible.maxX / Theme.thumbStride))
-                guard first < last else { return }
-                self?.onVisibleRange?(first..<last)
+                let range = layout.range(minX: visible.minX, maxX: visible.maxX)
+                guard !range.isEmpty else { return }
+                self?.onVisibleRange?(range)
             }
             // `.common` so the timer still fires while a trackpad scroll runs the event
             // tracking run loop mode — otherwise nothing loads until the scroll stops.
@@ -282,10 +293,14 @@ struct FilmstripView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let content = scroll.documentView as? FilmstripContentView else { return }
         context.coordinator.onVisibleRange = onVisibleRange
+        let layout = StripLayout(scenes: model.scenes ?? Scenes(total: model.files.count), stride: Theme.thumbStride,
+                                 gap: model.scenes == nil ? 0 : Theme.sceneGap)
         content.model = model
+        content.layout = layout
+        context.coordinator.layout = layout
         content.onClick = onClick
 
-        let width = max(scroll.bounds.width, CGFloat(model.files.count) * Theme.thumbStride)
+        let width = max(scroll.bounds.width, layout.width)
         let height = scroll.contentSize.height
         if content.frame.size != CGSize(width: width, height: height) {
             content.frame = NSRect(x: 0, y: 0, width: width, height: height)
@@ -312,7 +327,7 @@ struct FilmstripView: NSViewRepresentable {
         }
         if coordinator.lastIndex != model.index {
             coordinator.lastIndex = model.index
-            let x = CGFloat(model.index) * Theme.thumbStride
+            let x = layout.x(of: model.index)
             content.scrollToVisible(NSRect(x: x - 2, y: 0, width: Theme.thumbStride + 4, height: content.bounds.height))
         }
     }

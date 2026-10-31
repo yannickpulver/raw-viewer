@@ -728,4 +728,74 @@ final class LibraryTests: XCTestCase {
         XCTAssertTrue(lines[3].hasPrefix("To last rate: "))
         XCTAssertEqual(lines[4], "Avg/rate:    -")
     }
+
+    // MARK: - Scenes
+
+    /// Two scenes on disk: three frames a second apart, then two more five minutes later.
+    private func seedSceneFolder() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        for (index, offset) in [0.0, 1, 2, 300, 301].enumerated() {
+            let url = touch(String(format: "IMG_%04d.cr3", index))
+            let date = start.addingTimeInterval(offset)
+            try FileManager.default.setAttributes([.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
+        }
+        try await openAndWait(root)
+    }
+
+    func testSceneGroupingTogglesAndPersists() async throws {
+        try await seedSceneFolder()
+        XCTAssertNil(library.scenes)
+        library.toggleScenes()
+        XCTAssertEqual(library.scenes?.starts, [0, 3])
+        XCTAssertEqual(library.positionText, "1/5  ·  Scene 1/2")
+        XCTAssertEqual(library.snackbar?.text, "2 scenes")
+
+        let second = Library(preferences: Preferences(defaults: defaults),
+                             recents: RecentFolders(defaults: defaults))
+        XCTAssertTrue(second.groupScenes)
+
+        library.toggleScenes()
+        XCTAssertNil(library.scenes)
+        XCTAssertEqual(library.positionText, "1/5")
+    }
+
+    func testNavigateSceneJumpsBetweenSceneStarts() async throws {
+        try await seedSceneFolder()
+        library.navigateScene(by: 1)
+        XCTAssertEqual(library.index, 0, "no scenes while grouping is off")
+
+        library.toggleScenes()
+        library.navigateScene(by: 1)
+        XCTAssertEqual(library.index, 3)
+        library.navigateScene(by: 1)
+        XCTAssertEqual(library.index, 3, "no scene after the last")
+        library.navigate(by: 1)
+        library.navigateScene(by: -1)
+        XCTAssertEqual(library.index, 3, "back goes to the start of the current scene first")
+        library.navigateScene(by: -1)
+        XCTAssertEqual(library.index, 0)
+    }
+
+    func testGridMovesDownIntoTheNextScene() async throws {
+        try await seedSceneFolder()
+        library.toggleScenes()
+        library.gridColumns = 4
+        library.select(index: 1)
+        library.gridMove(dx: 0, dy: 1)
+        XCTAssertEqual(library.index, 4)
+        library.gridMove(dx: 0, dy: -1)
+        XCTAssertEqual(library.index, 1)
+    }
+
+    func testScenesStepAsideForBestFaces() async throws {
+        try await seedSceneFolder()
+        library.toggleScenes()
+        library.setSortOrder(.bestFaces)
+        XCTAssertNil(library.scenes)
+        library.toggleScenes()
+        XCTAssertTrue(library.groupScenes, "the toggle is refused, not flipped")
+        XCTAssertEqual(library.snackbar?.text, "Scenes need Oldest First or Newest First")
+        library.setSortOrder(.oldestFirst)
+        XCTAssertEqual(library.scenes?.starts, [0, 3])
+    }
 }

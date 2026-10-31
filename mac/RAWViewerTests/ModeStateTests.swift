@@ -234,4 +234,30 @@ final class ModeStateTests: XCTestCase {
 
 private extension Array {
     subscript(indices: [Int]) -> [Element] { indices.map { self[$0] } }
+
+    /// Mac app addition: scenes follow the filtered timeline, and only exist for date orders.
+    func testScenesFollowDateOrdersOnly() {
+        var state = ModeState()
+        state.allFiles = SceneFixtures.files([2, 3])
+        state.applyFilters(ratings: [:])
+        XCTAssertNil(state.scenes)
+
+        state.groupsScenes = true
+        state.applyFilters(ratings: [:])
+        XCTAssertEqual(state.scenes?.starts, [0, 2])
+
+        state.sortOrder = .newestFirst
+        state.applyFilters(ratings: [:])
+        XCTAssertEqual(state.scenes?.starts, [0, 3])
+
+        state.sortOrder = .bestFaces
+        state.applyFilters(ratings: [:])
+        XCTAssertNil(state.scenes)
+
+        // A filter that leaves one file per scene still cuts between them.
+        state.sortOrder = .oldestFirst
+        state.ratingFilter = RatingFilter(1)
+        state.applyFilters(ratings: [state.allFiles[1].url: 1, state.allFiles[4].url: 2])
+        XCTAssertEqual(state.scenes?.starts, [0, 1])
+    }
 }
