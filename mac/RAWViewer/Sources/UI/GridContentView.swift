@@ -5,6 +5,8 @@ struct GridModel {
     var files: [MediaFile]
     var index: Int
     var ratings: [URL: Int]
+    /// `nil` while scenes are not grouped: one plain grid.
+    var scenes: Scenes?
     var thumbRevision: Int
     /// See `FilmstripModel.ratingsRevision`: a value change is invisible to `ratings.count`.
     var ratingsRevision: Int
@@ -26,8 +28,7 @@ struct GridModel {
 final class GridCanvasView: NSView {
 
     var model: GridModel?
-    var columns: Int = 1
-    var cellSize: Int = GridLayout.cell
+    var geometry = GridGeometry(scenes: Scenes(total: 0), columns: 1)
     var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     var onActivate: ((Int) -> Void)?
     /// Kept alive across the popup and any share sheet it opens. See `SelectionMenuController`.
@@ -41,14 +42,14 @@ final class GridCanvasView: NSView {
         context.setFillColor(NSColor(white: 20.0 / 255.0, alpha: 1).cgColor)
         context.fill(dirtyRect)
 
-        let cell = cellSize
-        let range = GridLayout.visibleIndexRange(top: Int(dirtyRect.minY), bottom: Int(dirtyRect.maxY),
-                                                 columns: columns, total: model.files.count, cell: cell)
+        let cell = geometry.cell
+        let range = geometry.visibleIndexRange(top: Int(dirtyRect.minY), bottom: Int(dirtyRect.maxY))
         guard range.first <= range.last else { return }
+        drawSceneCaptions(model, first: range.first, last: range.last, dirtyRect: dirtyRect)
 
         for i in range.first...range.last {
             let file = model.files[i]
-            let origin = GridLayout.cellOrigin(index: i, columns: columns, cell: cell)
+            let origin = geometry.cellOrigin(index: i)
             let x = CGFloat(origin.x), y = CGFloat(origin.y), side = CGFloat(cell)
 
             context.setFillColor(NSColor(white: 40.0 / 255.0, alpha: 1).cgColor)
@@ -100,11 +101,32 @@ final class GridCanvasView: NSView {
         }
     }
 
+    /// `Sat, 20 Sep · 11:50 · 6 frames · 2 picked` in the band above each visible scene. The
+    /// scene after the last visible cell is included, since its band can show before its row.
+    private func drawSceneCaptions(_ model: GridModel, first: Int, last: Int, dirtyRect: NSRect) {
+        guard let scenes = model.scenes, geometry.header > 0 else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(white: 170.0 / 255.0, alpha: 1),
+        ]
+        for scene in scenes.scene(of: first)...min(scenes.count - 1, scenes.scene(of: last) + 1) {
+            let top = CGFloat(geometry.headerTop(scene: scene))
+            guard top < dirtyRect.maxY, top + CGFloat(geometry.header) > dirtyRect.minY else { continue }
+            let range = scenes.range(of: scene)
+            let picked = model.files[range].filter { (model.ratings[$0.url] ?? 0) > 0 }.count
+            var parts = [Library.formatCaptureDate(model.files[range.lowerBound].captureDate),
+                         range.count == 1 ? "1 frame" : "\(range.count) frames"]
+            if picked > 0 { parts.append("\(picked) picked") }
+            let text = NSAttributedString(string: parts.joined(separator: "  ·  "), attributes: attributes)
+            let inset: CGFloat = (CGFloat(geometry.header) - text.size().height) / 2 + 2
+            text.draw(at: NSPoint(x: CGFloat(geometry.spacing + 2), y: top + inset))
+        }
+    }
+
     override func mouseDown(with event: NSEvent) {
-        guard let model else { return }
+        guard model != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let index = GridLayout.index(atX: point.x, y: point.y, columns: columns,
-                                     total: model.files.count, cell: cellSize)
+        let index = geometry.index(atX: point.x, y: point.y)
         guard index >= 0 else { return }
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // AppKit delivers a control-click as `mouseDown` with `.control` set, not as
@@ -124,10 +146,9 @@ final class GridCanvasView: NSView {
     /// Right-click on an already-selected cell acts on the whole selection; otherwise the
     /// click first collapses the selection to that cell. Spec: mac app addition.
     override func rightMouseDown(with event: NSEvent) {
-        guard let model else { return }
+        guard model != nil else { return }
         let point = convert(event.locationInWindow, from: nil)
-        let index = GridLayout.index(atX: point.x, y: point.y, columns: columns,
-                                     total: model.files.count, cell: cellSize)
+        let index = geometry.index(atX: point.x, y: point.y)
         guard index >= 0 else { return }
         openMenu(at: index, point: point)
     }
@@ -142,9 +163,9 @@ final class GridCanvasView: NSView {
             urls = [model.files[index].url]
         }
 
-        let origin = GridLayout.cellOrigin(index: index, columns: columns, cell: cellSize)
+        let origin = geometry.cellOrigin(index: index)
         let rect = NSRect(x: CGFloat(origin.x), y: CGFloat(origin.y),
-                          width: CGFloat(cellSize), height: CGFloat(cellSize))
+                          width: CGFloat(geometry.cell), height: CGFloat(geometry.cell))
         let controller = SelectionMenuController(urls: urls, view: self, rect: rect)
         selectionMenuController = controller
         controller.makeMenu().popUp(positioning: nil, at: point, in: self)
@@ -160,9 +181,7 @@ struct GridView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         var onVisibleRange: ((Range<Int>) -> Void)?
-        var columns = 1
-        var cellSize = GridLayout.cell
-        var total = 0
+        var geometry = GridGeometry(scenes: Scenes(total: 0), columns: 1)
         var debounce: Timer?
         var lastIndex = -1
         var lastRevision = -1
@@ -178,10 +197,9 @@ struct GridView: NSViewRepresentable {
 
         func schedule(visible: NSRect) {
             debounce?.invalidate()
-            let columns = self.columns, cell = self.cellSize, total = self.total
+            let geometry = self.geometry
             let timer = Timer(timeInterval: 0.05, repeats: false) { [weak self] _ in
-                let range = GridLayout.visibleIndexRange(top: Int(visible.minY), bottom: Int(visible.maxY),
-                                                         columns: columns, total: total, cell: cell)
+                let range = geometry.visibleIndexRange(top: Int(visible.minY), bottom: Int(visible.maxY))
                 guard range.first <= range.last else { return }
                 self?.onVisibleRange?(range.first..<(range.last + 1))
             }
@@ -223,17 +241,16 @@ struct GridView: NSViewRepresentable {
         let width = Int(scroll.contentSize.width)
         let columns = GridLayout.columns(forWidth: width)
         let cell = GridLayout.cellSize(forWidth: width, columns: columns)
-        let height = GridLayout.contentHeight(total: model.files.count, columns: columns, cell: cell)
+        let geometry = GridGeometry(scenes: model.scenes ?? Scenes(total: model.files.count), columns: columns,
+                                    cell: cell, header: model.scenes == nil ? 0 : GridLayout.sceneHeader)
+        let height = geometry.contentHeight
 
         canvas.model = model
-        canvas.columns = columns
-        canvas.cellSize = cell
+        canvas.geometry = geometry
         canvas.onClick = onClick
         canvas.onActivate = onActivate
 
-        coordinator.columns = columns
-        coordinator.cellSize = cell
-        coordinator.total = model.files.count
+        coordinator.geometry = geometry
 
         let wanted = NSRect(x: 0, y: 0, width: scroll.contentSize.width, height: CGFloat(height))
         var layoutChanged = false
@@ -254,9 +271,12 @@ struct GridView: NSViewRepresentable {
         }
         if coordinator.lastIndex != model.index {
             coordinator.lastIndex = model.index
-            let origin = GridLayout.cellOrigin(index: model.index, columns: columns, cell: cell)
-            canvas.scrollToVisible(NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y) - 2,
-                                          width: CGFloat(cell) + 4, height: CGFloat(cell) + 4))
+            // The first row of a scene brings its caption into view with it.
+            let origin = geometry.cellOrigin(index: model.index)
+            let onFirstRow = model.scenes.map { model.index - $0.starts[$0.scene(of: model.index)] < columns } ?? false
+            let header = onFirstRow ? geometry.header : 0
+            canvas.scrollToVisible(NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y - header) - 2,
+                                          width: CGFloat(cell) + 4, height: CGFloat(cell + header) + 4))
         }
         // First real layout: no scroll has happened, so the visible range has never been
         // pushed and the first viewport would sit on 80 px thumbs until the user scrolls.

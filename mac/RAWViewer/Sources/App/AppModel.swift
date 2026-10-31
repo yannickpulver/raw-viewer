@@ -225,6 +225,11 @@ public final class AppModel {
             Task { await library.jumpToLastRated() }
             return true
         }
+        // Mac app addition: no Python-app equivalent.
+        if shift, characters == "s" {
+            library.toggleScenes()
+            return true
+        }
 
         if bare {
             if let value = digit(keyCode: key, characters: characters) {
@@ -246,6 +251,9 @@ public final class AppModel {
         switch key {
         case KeyCode.right: library.navigate(by: 1); return true
         case KeyCode.left: library.navigate(by: -1); return true
+        // Mac app addition: frames go left / right, scenes up / down.
+        case KeyCode.down: library.navigateScene(by: 1); return true
+        case KeyCode.up: library.navigateScene(by: -1); return true
         case KeyCode.space: toggleSpace(); return true
         default: break
         }

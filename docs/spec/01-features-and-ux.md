@@ -503,6 +503,21 @@ Thumbnail repaints are batched on a 50 ms timer, selection repaints immediate
 (`grid_view.py:93`, `:133`). Scroll events debounce the visible-range signal by
 50 ms (`grid_view.py:247`).
 
+Mac app addition, no Python-app equivalent: **Group by Scene** (`⇧S`, View menu,
+persisted). A scene is a run of consecutive files shot at most 60 s apart
+(`Scenes.maxGap`). While grouping is on:
+
+- the grid starts every scene on a new row, under a 26 px caption:
+  `Sat, 20 Sep · 11:50 · 6 frames · 2 picked`
+- the filmstrip leaves a 16 px gap with a hairline between scenes
+- `↓` / `↑` in the single view jump to the next / previous scene start (back
+  from mid-scene goes to that scene's start first); grid arrows move by row and
+  clamp into shorter scene rows
+- the position counter reads `7/137  ·  Scene 12/118`
+
+Scenes only exist in the date orders. Under Best Faces the timeline stays flat,
+the menu item is disabled and `⇧S` shows a snackbar instead of toggling.
+
 ---
 
 ## 9. Compare mode

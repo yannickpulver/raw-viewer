@@ -29,6 +29,11 @@ public struct ModeState: Sendable {
     public var folderFilter: String?
     public var excludedFolders: Set<String> = []
     public var sortOrder: SortOrder = .oldestFirst
+    /// Mac app addition: cut the timeline into scenes (`Scenes`). Only date orders have
+    /// scenes; Best Faces mixes moments, so `scenes` stays `nil` there.
+    public var groupsScenes = false
+    /// The scenes of `files` while grouping applies, otherwise `nil`. Set by `applyFilters`.
+    public private(set) var scenes: Scenes?
 
     /// Multi-select. Mac app addition — no Python-app equivalent. `index` stays the single
     /// current file; `selectedURLs` is the (possibly larger) set drawn with the amber border.
@@ -78,6 +83,7 @@ public struct ModeState: Sendable {
                 return left != right ? left > right : lhs.offset < rhs.offset
             }.map(\.element)
         }
+        scenes = groupsScenes && sortOrder != .bestFaces ? Scenes(files: files) : nil
         if let previous, let kept = files.firstIndex(of: previous) {
             index = kept
         } else {

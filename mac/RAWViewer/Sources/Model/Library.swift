@@ -53,6 +53,8 @@ public final class Library {
     }
     /// `F`: face boxes on the canvas plus the face crops. Display only; detection keeps running.
     public var showFaces: Bool { didSet { preferences.showFaces = showFaces } }
+    /// `⇧S`: cut every timeline into scenes. Mac app addition, no Python-app equivalent.
+    public private(set) var groupScenes: Bool { didSet { preferences.groupScenes = groupScenes } }
 
     public private(set) var isScanning = false
     public private(set) var scanProgressText: String?
@@ -134,6 +136,7 @@ public final class Library {
         self.sortOrder = preferences.sortOrder
         self.showFaces = preferences.showFaces
         self.faceDetection = preferences.faceDetection
+        self.groupScenes = preferences.groupScenes
         recents.importLegacyIfNeeded(preferences: preferences)
         self.scheduler.onRatingDiscovered = { [weak self] url, rating in
             guard let self, self.ratings[url] == nil else { return }
@@ -161,6 +164,8 @@ public final class Library {
     public var ratingFilter: RatingFilter { state.ratingFilter }
     public var folderFilter: String? { state.folderFilter }
     public var excludedFolders: Set<String> { state.excludedFolders }
+    /// The current timeline's scenes, or `nil` while grouping is off or does not apply.
+    public var scenes: Scenes? { state.scenes }
     public var isEmpty: Bool { files.isEmpty }
     /// True while a folder with at least one file in any mode is open, even if the active filter hides everything.
     public var hasLoadedFolder: Bool { modeStates.values.contains { !$0.allFiles.isEmpty } }
@@ -243,6 +248,7 @@ public final class Library {
             var modeState = ModeState()
             modeState.allFiles = result.files(for: mode)
             modeState.sortOrder = sortOrder
+            modeState.groupsScenes = groupScenes
             modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
             states[mode] = modeState
         }
@@ -316,6 +322,22 @@ public final class Library {
         select(index: files.count - 1)
     }
 
+    /// `↓` / `↑` while scenes are grouped: the first file of the next scene, or of the
+    /// previous one. Back from the middle of a scene goes to that scene's start first, like
+    /// the previous-track button of a player.
+    public func navigateScene(by delta: Int) {
+        guard let scenes, !files.isEmpty else { return }
+        let current = scenes.scene(of: state.index)
+        let target: Int
+        if delta < 0, state.index > scenes.starts[current] {
+            target = current
+        } else {
+            target = current + delta
+        }
+        guard target >= 0, target < scenes.count else { return }
+        select(index: scenes.starts[target])
+    }
+
     /// Spec 01 §17: loads every rating from disk, then jumps to the last file rated above 0.
     public func jumpToLastRated() async {
         await loadAllRatings()
@@ -342,10 +364,8 @@ public final class Library {
             target = min(files.count - 1, max(0, target + dx))
         }
         if dy != 0 {
-            target = GridLayout.moveVertical(index: target,
-                                             columns: max(1, gridColumns),
-                                             total: files.count,
-                                             deltaRows: dy)
+            target = GridGeometry(scenes: scenes ?? Scenes(total: files.count), columns: gridColumns)
+                .moveVertical(index: target, deltaRows: dy)
         }
         guard target != state.index else { return }
         state.index = target
@@ -535,6 +555,26 @@ public final class Library {
         }
         scheduler.stopBackgroundSweep()
         afterFilterChange()
+    }
+
+    /// `⇧S`. Grouping follows capture time, so Best Faces keeps one flat list and says so.
+    public func toggleScenes() {
+        guard sortOrder != .bestFaces else {
+            post(SnackbarEvent(text: "Scenes need Oldest First or Newest First", durationMs: 2500))
+            return
+        }
+        groupScenes.toggle()
+        for mode in ViewMode.allCases {
+            var modeState = modeStates[mode] ?? ModeState()
+            modeState.groupsScenes = groupScenes
+            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+            modeStates[mode] = modeState
+        }
+        scheduler.stopBackgroundSweep()
+        afterFilterChange()
+        if hasLoadedFolder {
+            post(SnackbarEvent(text: scenes.map { "\($0.count) scenes" } ?? "Scenes off", durationMs: 1500))
+        }
     }
 
     /// A finished face sweep brings scores for files that had none, so Best Faces sorts again.
@@ -930,6 +970,7 @@ public final class Library {
     public var positionText: String {
         guard !files.isEmpty else { return "" }
         var text = "\(state.index + 1)/\(files.count)"
+        if let scenes { text += "  ·  Scene \(scenes.scene(of: state.index) + 1)/\(scenes.count)" }
         if let badge = state.ratingFilter.badgeText { text += "  (\(badge))" }
         if let folderFilter = state.folderFilter {
             text += "  [\(folderFilter)]"

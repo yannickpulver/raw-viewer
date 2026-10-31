@@ -24,6 +24,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Sort oldest first, newest first, or by best faces (most sharp, open-eyed faces first)
 - Video mode (MOV/MP4 playback)
 - All mode: RAW, JPEG and video in one timeline
+- Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
 
@@ -57,11 +58,13 @@ python main.py "/path/to/photos"
 | Key | Action |
 |-----|--------|
 | `←` `→` | Previous / Next image |
+| `↑` `↓` | Previous / Next scene (while grouped by scene) |
 | `0-5` | Set rating (auto-advances) |
 | `Cmd+0-5` | Filter by minimum rating |
 | `S` | Jump to first (start) |
 | `E` | Jump to last (end) |
 | `Shift+R` | Jump to last rated |
+| `Shift+S` | Group by scene |
 | `R` | Rotate image 90° (view only) |
 | `I` | Toggle info overlay |
 | `F` | Show / hide faces (needs face detection on) |

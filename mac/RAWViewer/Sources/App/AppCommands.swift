@@ -90,6 +90,12 @@ struct AppCommands: Commands {
                 .disabled(!model.filesLoaded)
             Button(Self.title("Go to Last Rated", "⇧R")) { Task { await library.jumpToLastRated() } }
                 .disabled(!model.filesLoaded)
+            // Mac app addition: no Python-app equivalent.
+            Divider()
+            Button(Self.title("Next Scene", "↓")) { library.navigateScene(by: 1) }
+                .disabled(library.scenes == nil)
+            Button(Self.title("Previous Scene", "↑")) { library.navigateScene(by: -1) }
+                .disabled(library.scenes == nil)
         }
 
         CommandGroup(replacing: .toolbar) {
@@ -114,6 +120,10 @@ struct AppCommands: Commands {
                 sortToggle("Best Faces", .bestFaces)
                     .disabled(!library.faceDetection)
             }
+            // Mac app addition: no Python-app equivalent.
+            Toggle(Self.title("Group by Scene", "⇧S"), isOn: Binding(get: { library.groupScenes },
+                                                                     set: { _ in library.toggleScenes() }))
+                .disabled(library.sortOrder == .bestFaces)
             Divider()
             Button(Self.title("Rotate 90°", "R")) { model.rotate() }
                 .disabled(!model.filesLoaded || model.showsVideo)

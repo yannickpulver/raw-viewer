@@ -16,6 +16,7 @@ public final class Preferences {
             Keys.newestFirst: false,
             Keys.showFaces: true,
             Keys.faceDetection: false,
+            Keys.groupScenes: false,
         ])
     }
 
@@ -29,6 +30,7 @@ public final class Preferences {
         public static let sortOrder = "sortOrder"
         public static let showFaces = "showFaces"
         public static let faceDetection = "faceDetection"
+        public static let groupScenes = "groupScenes"
     }
 
     public var showInfo: Bool {
@@ -64,5 +66,10 @@ public final class Preferences {
     public var faceDetection: Bool {
         get { defaults.bool(forKey: Keys.faceDetection) }
         set { defaults.set(newValue, forKey: Keys.faceDetection) }
+    }
+
+    public var groupScenes: Bool {
+        get { defaults.bool(forKey: Keys.groupScenes) }
+        set { defaults.set(newValue, forKey: Keys.groupScenes) }
     }
 }
