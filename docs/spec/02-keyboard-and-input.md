@@ -75,7 +75,9 @@ commands, not part of the single key dispatcher table above. `N` with
 (UserDefaults) preference that reverses the per-mode timeline order (oldest-
 first is the default) while keeping the current file selected. `S` with
 `Shift` toggles Group by Scene, and in the single view `↓` / `↑` jump to the
-next / previous scene while scenes are grouped (spec 01 §8 addendum).
+next / previous scene while scenes are grouped (spec 01 §8 addendum). `V`
+starts the duel, where `←` / `→` / `↓` choose and `⌘Z` undoes; `Esc` leaves it
+before closing compare or the folder.
 
 ### Bindings with no modifier check
 

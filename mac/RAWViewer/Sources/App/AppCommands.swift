@@ -57,6 +57,13 @@ struct AppCommands: Commands {
                 .disabled(!model.filesLoaded)
         }
 
+        // The app has nothing else to undo, so Edit → Undo is the duel's. Mac app addition.
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo Duel Choice") { library.undoDuel() }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(library.duel == nil)
+        }
+
         CommandMenu("Rate") {
             ForEach(0...5, id: \.self) { value in
                 Button(Self.title(value == 0 ? "Clear Rating" : "\(value) Star\(value == 1 ? "" : "s")",
@@ -100,6 +107,9 @@ struct AppCommands: Commands {
 
         CommandGroup(replacing: .toolbar) {
             Button(Self.title("Toggle Grid View", "G")) { library.toggleGrid() }
+            // Mac app addition: no Python-app equivalent.
+            Button(Self.title("Duel the Scene", "V")) { library.toggleDuel() }
+                .disabled(!model.filesLoaded || library.sortOrder == .bestFaces)
             Button(Self.title("Toggle Compare", "C")) { library.toggleCompare() }
             Button("Toggle Filmstrip") { library.toggleFilmstrip() }
                 .keyboardShortcut("s", modifiers: .command)

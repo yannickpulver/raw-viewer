@@ -518,6 +518,25 @@ persisted). A scene is a run of consecutive files shot at most 60 s apart
 Scenes only exist in the date orders. Under Best Faces the timeline stays flat,
 the menu item is disabled and `⇧S` shows a snackbar instead of toggling.
 
+Mac app addition: **Duel** (`V`, View menu). Two frames of the current scene
+side by side, at the same zoom. It turns Group by Scene on if it is off and
+starts at the first scene from the current one with at least two frames. It
+respects the rating filter, so `⌘1` then `V` is a second pass over the picks.
+
+- `←` keeps the left frame, `→` the right one: the winner stays where it is and
+  the scene's next frame takes the loser's slot. Losers keep their rating.
+- `↓` keeps both: both get 2★ now, the right slot takes the next frame
+- when the scene runs out, its winner gets 2★ (`Library.duelWinnerRating`, never
+  lowering a higher rating) and the next scene with two frames starts; after the
+  last one a snackbar says `All scenes compared` and the single view returns
+- `⌘Z` (Edit → Undo) undoes the last choice, stars included
+- the newest frame is the current file, so its preview loads first; the counter
+  reads `7/137  ·  Scene 4/23  ·  Duel 2/3`
+- zoom and pan are shared by both frames (`CanvasZoomGroup`) and survive the
+  next scene; `R` rotates the newest frame only
+- rating keys and `X` do nothing; compare (`C`) is refused; a filter, sort,
+  mode or grid change ends the duel; `Esc` returns to the single view
+
 ---
 
 ## 9. Compare mode

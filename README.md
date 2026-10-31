@@ -25,6 +25,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Video mode (MOV/MP4 playback)
 - All mode: RAW, JPEG and video in one timeline
 - Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip
+- Duel: two frames of a scene side by side with shared zoom; keep one or both until the scene's best get 2★ (`Cmd+1`, then `V`)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
 
@@ -65,6 +66,7 @@ python main.py "/path/to/photos"
 | `E` | Jump to last (end) |
 | `Shift+R` | Jump to last rated |
 | `Shift+S` | Group by scene |
+| `V` | Duel: `←` / `→` keeps one, `↓` both, `Cmd+Z` undoes |
 | `R` | Rotate image 90° (view only) |
 | `I` | Toggle info overlay |
 | `F` | Show / hide faces (needs face detection on) |

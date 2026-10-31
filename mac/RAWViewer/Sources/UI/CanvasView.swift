@@ -36,6 +36,10 @@ final class CanvasNSView: NSView {
 
     var onNavigate: ((Int) -> Void)?
     var onFocus: (() -> Void)?
+    /// The scene view's tiles share one zoom and pan through this.
+    weak var zoomGroup: CanvasZoomGroup?
+    /// Set while taking the group's zoom, so it is not reported straight back.
+    private var adopting = false
     /// Kept alive across the popup and any share sheet it opens. See `SelectionMenuController`.
     private var selectionMenuController: SelectionMenuController?
 
@@ -206,6 +210,17 @@ final class CanvasNSView: NSView {
         imageLayer.position = CGPoint(x: bounds.midX + offset.x, y: bounds.midY + offset.y)
         CATransaction.commit()
         loadHiResIfMagnified()
+        if !adopting { zoomGroup?.changed(self) }
+    }
+
+    /// Takes another canvas's zoom and pan. Stored even before an image arrives.
+    func adopt(zoom: Double, offset: CGPoint) {
+        guard zoom != self.zoom || offset != self.offset else { return }
+        adopting = true
+        self.zoom = zoom
+        self.offset = offset
+        applyTransform()
+        adopting = false
     }
 
     /// Once a preview pixel covers more than one screen pixel, decode the whole file. Waits a
@@ -363,6 +378,10 @@ struct CanvasView: NSViewRepresentable {
     var faceFocus: CGRect?
     var onNavigate: (Int) -> Void
     var onFocus: () -> Void
+    var zoomGroup: CanvasZoomGroup?
+    /// `false` keeps the tokens in step without acting on them: a scene-view tile that is not
+    /// focused must not rotate or zoom, nor do it later when it gets the focus.
+    var takesCommands = true
 
     final class Coordinator {
         var rotationToken = 0
@@ -374,6 +393,8 @@ struct CanvasView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> CanvasNSView {
         let view = CanvasNSView(frame: .zero)
+        view.zoomGroup = zoomGroup
+        zoomGroup?.join(view)
         context.coordinator.rotationToken = rotationToken
         context.coordinator.zoomToken = zoomToken
         context.coordinator.faceFocusToken = faceFocusToken
@@ -387,15 +408,38 @@ struct CanvasView: NSViewRepresentable {
         view.set(faces: faces)
         if context.coordinator.rotationToken != rotationToken {
             context.coordinator.rotationToken = rotationToken
-            view.rotate()
+            if takesCommands { view.rotate() }
         }
         if context.coordinator.zoomToken != zoomToken {
             context.coordinator.zoomToken = zoomToken
-            view.toggleDoubleZoom()
+            if takesCommands { view.toggleDoubleZoom() }
         }
         if context.coordinator.faceFocusToken != faceFocusToken {
             context.coordinator.faceFocusToken = faceFocusToken
             if let faceFocus { view.focus(face: faceFocus) }
+        }
+    }
+}
+
+/// Keeps the zoom and pan of several canvases in step, so the scene view shows every frame at
+/// the same spot. A canvas that joins later takes the group's current zoom, which is how zoom
+/// survives moving to the next scene, as it survives navigation in the single view.
+final class CanvasZoomGroup {
+    private let views = NSHashTable<CanvasNSView>.weakObjects()
+    private(set) var zoom = 1.0
+    private(set) var offset = CGPoint.zero
+
+    func join(_ view: CanvasNSView) {
+        views.add(view)
+        view.adopt(zoom: zoom, offset: offset)
+    }
+
+    func changed(_ source: CanvasNSView) {
+        guard source.zoom != zoom || source.offset != offset else { return }
+        zoom = source.zoom
+        offset = source.offset
+        for view in views.allObjects where view !== source {
+            view.adopt(zoom: zoom, offset: offset)
         }
     }
 }

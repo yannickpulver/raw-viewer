@@ -32,4 +32,13 @@ final class ScenesTests: XCTestCase {
         XCTAssertEqual(Scenes(total: 5).starts, [0])
         XCTAssertEqual(Scenes(total: 5).range(of: 0), 0..<5)
     }
+
+    func testTileLayoutPicksTheLargestSplit() {
+        XCTAssertTrue(TileLayout.grid(count: 1, width: 2000, height: 1000, aspect: 1.5) == (1, 1))
+        XCTAssertTrue(TileLayout.grid(count: 2, width: 2000, height: 1000, aspect: 1.5) == (2, 1))
+        XCTAssertTrue(TileLayout.grid(count: 2, width: 1000, height: 1400, aspect: 1.5) == (1, 2))
+        XCTAssertTrue(TileLayout.grid(count: 2, width: 2000, height: 1200, aspect: 0.67) == (2, 1),
+                      "portrait frames sit side by side")
+        XCTAssertTrue(TileLayout.grid(count: 4, width: 2000, height: 1200, aspect: 1.5) == (2, 2))
+    }
 }
