@@ -47,6 +47,9 @@ final class CanvasNSView: NSView {
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
+        // A zoomed image stays inside its own canvas when canvases sit side by side
+        // (compare, duel), instead of spilling over the neighbour.
+        layer?.masksToBounds = true
         imageLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         imageLayer.magnificationFilter = .trilinear
         imageLayer.minificationFilter = .trilinear
