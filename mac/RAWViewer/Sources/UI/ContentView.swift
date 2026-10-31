@@ -13,7 +13,7 @@ struct ContentView: View {
         let ratings = library.ratings
         let scheduler = library.scheduler
         let thumbRevision = scheduler.thumbs80.count &+ scheduler.thumbs200.count &+ scheduler.previewRevision
-        let showFilmstrip = !files.isEmpty && library.filmstripVisible && library.displayMode == .single
+        let showFilmstrip = !files.isEmpty && library.filmstripVisible && library.displayMode != .grid
 
         VStack(spacing: 0) {
             ZStack {
@@ -97,6 +97,8 @@ struct ContentView: View {
             } else {
                 EmptyStateView(model: model)
             }
+        } else if library.displayMode == .duel {
+            DuelPane(model: model)
         } else if library.isCompareActive {
             comparePanes
         } else if model.showsVideo {

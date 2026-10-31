@@ -4,6 +4,8 @@ import Foundation
 public enum DisplayMode: String, Sendable {
     case single
     case grid
+    /// Mac app addition: two frames of the current scene side by side, the better one stays.
+    case duel
 }
 
 /// Which compare pane has focus. Spec 01 §9.

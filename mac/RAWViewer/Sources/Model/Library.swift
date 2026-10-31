@@ -236,6 +236,7 @@ public final class Library {
         }
 
         scheduler.closeFolder()
+        endDuel()
         recents.add(url)
         ratings.removeAll()
         ratingsRevision &+= 1
@@ -289,6 +290,7 @@ public final class Library {
         resetShootTimer()
         scheduler.closeFolder()
         faceIndex.stop()
+        endDuel()
         pinnedFile = nil
         focusedPane = .right
         modeStates = Self.emptyModeStates
@@ -599,6 +601,8 @@ public final class Library {
     }
 
     private func afterFilterChange() {
+        // The duel holds indices into `files`, which a filter or sort change reorders.
+        endDuel()
         selectionRevision &+= 1
         scheduler.reset(totalFileCount: files.count)
         refreshPreloading()
@@ -628,6 +632,7 @@ public final class Library {
         }
         guard target != viewMode else { return }
         exitCompare()
+        endDuel()
         viewMode = target
         selectionRevision &+= 1
         scheduler.reset(totalFileCount: files.count)
@@ -643,19 +648,135 @@ public final class Library {
             refreshPreloading()
         } else {
             exitCompare()
+            endDuel()
             displayMode = .grid
         }
     }
 
+    // MARK: - Duel (mac app addition, no Python-app equivalent)
+
+    /// Two frames of one scene side by side. The better one stays where it is and the scene's
+    /// next frame takes the other slot, until the scene runs out.
+    public struct Duel: Equatable, Sendable {
+        public var scene: Int
+        public var left: Int
+        public var right: Int
+        /// The frame that arrived last. It is the current file, so its preview loads first and
+        /// the scene's next frames preload behind it; the other one was on screen already.
+        public var current: Int
+        /// The scene's frames still waiting for their turn, in timeline order.
+        public var queue: [Int]
+        public var round: Int
+        public var rounds: Int
+    }
+
+    public enum DuelChoice: Sendable {
+        case left, right
+        /// Both are keepers: both get the winner's rating, the right slot takes the next frame.
+        case both
+    }
+
+    /// What a duel's winner is rated, unless it already has more.
+    public static let duelWinnerRating = 2
+
+    public private(set) var duel: Duel?
+    /// One entry per decision, for `undoDuel`: the duel before it and the ratings it replaced.
+    @ObservationIgnored private var duelHistory: [(duel: Duel, ratings: [(file: MediaFile, previous: Int)])] = []
+
+    /// `V`: duel the current scene's frames, two at a time. With a rating filter on, only the
+    /// frames that pass take part, so `⌘1` then `V` is a second pass over the picks. Turns
+    /// scene grouping on when it is off, since the duel is made of scenes.
+    public func toggleDuel() {
+        if displayMode == .duel {
+            endDuel()
+            return
+        }
+        guard !files.isEmpty else { return }
+        if scenes == nil { toggleScenes() }
+        guard let scenes else { return }
+        guard let scene = duelScene(from: scenes.scene(of: state.index), in: scenes) else {
+            post(SnackbarEvent(text: "No scene with two frames to compare", durationMs: 2500))
+            return
+        }
+        exitCompare()
+        displayMode = .duel
+        duelHistory = []
+        startDuel(scene: scene, in: scenes)
+    }
+
+    /// `←` / `→` / `↓` in the duel.
+    public func decideDuel(_ choice: DuelChoice) {
+        guard var next = duel, let scenes else { return }
+        let before = next
+        var changed: [(file: MediaFile, previous: Int)] = []
+        func promote(_ index: Int) {
+            let file = files[index]
+            let previous = rating(for: file.url)
+            guard previous < Self.duelWinnerRating else { return }
+            changed.append((file, previous))
+            apply(rating: Self.duelWinnerRating, to: file)
+        }
+        if choice == .both {
+            promote(next.left)
+            promote(next.right)
+        }
+        guard !next.queue.isEmpty else {
+            promote(choice == .right ? next.right : next.left)
+            duelHistory.append((before, changed))
+            if let scene = duelScene(from: next.scene + 1, in: scenes) {
+                startDuel(scene: scene, in: scenes)
+            } else {
+                endDuel()
+                post(SnackbarEvent(text: "All scenes compared", durationMs: 2500))
+            }
+            return
+        }
+        let challenger = next.queue.removeFirst()
+        if choice == .right { next.left = challenger } else { next.right = challenger }
+        next.current = challenger
+        next.round += 1
+        duelHistory.append((before, changed))
+        duel = next
+        select(index: challenger)
+    }
+
+    /// `⌘Z` in the duel: back to before the last decision, ratings included.
+    public func undoDuel() {
+        guard displayMode == .duel, let last = duelHistory.popLast() else { return }
+        for (file, previous) in last.ratings.reversed() {
+            apply(rating: previous, to: file)
+        }
+        duel = last.duel
+        select(index: last.duel.current)
+    }
+
+    /// The first scene from `scene` on with at least two frames.
+    private func duelScene(from scene: Int, in scenes: Scenes) -> Int? {
+        (scene..<scenes.count).first { scenes.range(of: $0).count > 1 }
+    }
+
+    private func startDuel(scene: Int, in scenes: Scenes) {
+        let frames = Array(scenes.range(of: scene))
+        duel = Duel(scene: scene, left: frames[0], right: frames[1], current: frames[1],
+                    queue: Array(frames.dropFirst(2)), round: 1, rounds: frames.count - 1)
+        select(index: frames[1])
+    }
+
+    private func endDuel() {
+        duel = nil
+        duelHistory = []
+        if displayMode == .duel { displayMode = .single }
+    }
+
     // MARK: - Compare
 
-    /// Spec 01 §9: unavailable on a video and with no files.
+    /// Spec 01 §9: unavailable on a video and with no files. The duel already compares.
     public func toggleCompare() {
         if isCompareActive {
             exitCompare()
             return
         }
-        guard let current = currentFile, current.kind != .video else { return }
+        guard displayMode != .duel, let current = currentFile, current.kind != .video else { return }
         pinnedFile = current
         focusedPane = .right
     }
@@ -971,6 +1092,7 @@ public final class Library {
         guard !files.isEmpty else { return "" }
         var text = "\(state.index + 1)/\(files.count)"
         if let scenes { text += "  ·  Scene \(scenes.scene(of: state.index) + 1)/\(scenes.count)" }
+        if let duel { text += "  ·  Duel \(duel.round)/\(duel.rounds)" }
         if let badge = state.ratingFilter.badgeText { text += "  (\(badge))" }
         if let folderFilter = state.folderFilter {
             text += "  [\(folderFilter)]"

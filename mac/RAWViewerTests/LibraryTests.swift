@@ -798,4 +798,104 @@ final class LibraryTests: XCTestCase {
         library.setSortOrder(.oldestFirst)
         XCTAssertEqual(library.scenes?.starts, [0, 3])
     }
+
+    // MARK: - Duel
+
+    /// Scenes on disk with the given frame counts: frames a second apart, scenes 5 min apart.
+    private func seedScenes(_ sizes: [Int]) async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        var index = 0
+        for (scene, size) in sizes.enumerated() {
+            for frame in 0..<size {
+                let url = touch(String(format: "IMG_%04d.cr3", index))
+                let date = start.addingTimeInterval(Double(scene * 300 + frame))
+                try FileManager.default.setAttributes([.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
+                index += 1
+            }
+        }
+        try await openAndWait(root)
+    }
+
+    private var duelSlots: [Int]? { library.duel.map { [$0.left, $0.right] } }
+    private var ratingsByIndex: [Int] { library.files.map { library.rating(for: $0.url) } }
+
+    func testDuelWinnerStaysAndTheSceneWinnerGetsTwoStars() async throws {
+        try await seedScenes([3, 2])
+        library.toggleDuel()
+        XCTAssertEqual(library.displayMode, .duel)
+        XCTAssertTrue(library.groupScenes, "the duel turns scene grouping on")
+        XCTAssertEqual(duelSlots, [0, 1])
+        XCTAssertEqual(library.positionText, "2/5  ·  Scene 1/2  ·  Duel 1/2")
+
+        library.decideDuel(.right)          // 1 beats 0, 2 takes the left slot
+        XCTAssertEqual(duelSlots, [2, 1])
+        XCTAssertEqual(library.index, 2, "the new frame is current")
+
+        library.decideDuel(.right)          // 1 wins scene 1
+        XCTAssertEqual(ratingsByIndex, [0, 2, 0, 0, 0])
+        XCTAssertEqual(duelSlots, [3, 4])
+
+        library.decideDuel(.both)           // both of scene 2 are keepers, and that was the last scene
+        XCTAssertEqual(ratingsByIndex, [0, 2, 0, 2, 2])
+        XCTAssertNil(library.duel)
+        XCTAssertEqual(library.displayMode, .single)
+        XCTAssertEqual(library.snackbar?.text, "All scenes compared")
+    }
+
+    func testKeepBothPromotesBothAndBringsTheNextFrame() async throws {
+        try await seedScenes([3])
+        library.toggleDuel()
+        library.decideDuel(.both)
+        XCTAssertEqual(ratingsByIndex, [2, 2, 0])
+        XCTAssertEqual(duelSlots, [0, 2])
+        library.decideDuel(.right)
+        XCTAssertEqual(ratingsByIndex, [2, 2, 2])
+    }
+
+    func testWinnersAreNeverLowered() async throws {
+        try await seedScenes([2])
+        library.select(index: 1)
+        library.rate(4)
+        library.toggleDuel()
+        library.decideDuel(.right)
+        XCTAssertEqual(library.rating(for: library.files[1].url), 4)
+    }
+
+    func testUndoRestoresTheDuelAndItsRatings() async throws {
+        try await seedScenes([2, 2])
+        library.toggleDuel()
+        library.decideDuel(.left)           // 0 wins scene 1, scene 2 starts
+        XCTAssertEqual(duelSlots, [2, 3])
+        library.undoDuel()
+        XCTAssertEqual(duelSlots, [0, 1])
+        XCTAssertEqual(ratingsByIndex, [0, 0, 0, 0])
+        XCTAssertEqual(library.index, 1)
+        library.undoDuel()
+        XCTAssertEqual(duelSlots, [0, 1], "nothing left to undo")
+    }
+
+    func testDuelSkipsScenesWithOneFrame() async throws {
+        try await seedScenes([1, 2, 1, 2])
+        library.toggleDuel()
+        XCTAssertEqual(duelSlots, [1, 2], "starts at the first scene with two frames")
+        library.decideDuel(.left)
+        XCTAssertEqual(duelSlots, [4, 5])
+    }
+
+    func testDuelNeedsAScenesWithTwoFrames() async throws {
+        try await seedScenes([1, 1])
+        library.toggleDuel()
+        XCTAssertEqual(library.displayMode, .single)
+        XCTAssertEqual(library.snackbar?.text, "No scene with two frames to compare")
+    }
+
+    func testDuelEndsOnFilterChangeAndRefusesCompare() async throws {
+        try await seedScenes([3])
+        library.toggleDuel()
+        library.toggleCompare()
+        XCTAssertFalse(library.isCompareActive)
+        await library.setRatingFilter(1)
+        XCTAssertNil(library.duel)
+        XCTAssertEqual(library.displayMode, .single)
+    }
 }

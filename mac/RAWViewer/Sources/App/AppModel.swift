@@ -88,16 +88,17 @@ public final class AppModel {
 
     /// Spec 02 §1: `Space` is play/pause on a video, 2x zoom otherwise.
     func toggleSpace() {
-        if showsVideo, !library.isCompareActive { video.togglePlay() } else { zoomToken += 1 }
+        if showsVideo, !library.isCompareActive, library.displayMode != .duel { video.togglePlay() } else { zoomToken += 1 }
     }
 
     /// Spec 02 §1-2, plus the mac app's overlays and multi-selection: help → stats →
-    /// multi-selection → grid → compare → close the folder.
+    /// multi-selection → grid → duel → compare → close the folder.
     func escape() {
         if showHelp { showHelp = false; return }
         if showStats { showStats = false; return }
         if library.clearMultiSelection() { return }
         if isGrid { library.toggleGrid(); return }
+        if library.displayMode == .duel { library.toggleDuel(); return }
         if library.isCompareActive { library.exitCompare(); return }
         library.closeFolder()
     }
@@ -187,6 +188,20 @@ public final class AppModel {
         // grid-mode refusal below, which would otherwise swallow it via KeyCode.escape.
         if key == KeyCode.escape { escape(); return true }
 
+        // Mac app addition: in the duel the arrows choose and ⌘Z undoes. Rating keys and X
+        // rest, so a stray key cannot rate a frame behind the duel's back.
+        if library.displayMode == .duel {
+            switch key {
+            case KeyCode.left: library.decideDuel(.left); return true
+            case KeyCode.right: library.decideDuel(.right); return true
+            case KeyCode.down: library.decideDuel(.both); return true
+            case KeyCode.up: return true
+            default: break
+            }
+            if command, characters == "z" { library.undoDuel(); return true }
+            if bare, characters == "x" || digit(keyCode: key, characters: characters) != nil { return true }
+        }
+
         // Grid mode gets first refusal.
         if isGrid {
             switch key {
@@ -243,6 +258,8 @@ public final class AppModel {
             case "c": library.toggleCompare(); return true
             case "g": library.toggleGrid(); return true
             case "f": library.toggleFaces(); return true
+            // Mac app addition: no Python-app equivalent.
+            case "v": library.toggleDuel(); return true
             default: break
             }
         }

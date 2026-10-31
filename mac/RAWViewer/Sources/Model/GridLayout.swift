@@ -181,3 +181,22 @@ public struct StripLayout {
         return slot(atX: max(0, minX)).index..<(slot(atX: maxX).index + 1)
     }
 }
+
+/// Rows and columns for the scene view: the split that shows `count` images of `aspect`
+/// (width / height) the largest in a `width` x `height` area.
+public enum TileLayout {
+    public static func grid(count: Int, width: Double, height: Double, aspect: Double) -> (columns: Int, rows: Int) {
+        guard count > 1, width > 0, height > 0, aspect > 0 else { return (1, 1) }
+        var best = (columns: 1, rows: count), bestArea = 0.0
+        for columns in 1...count {
+            let rows = (count + columns - 1) / columns
+            let imageWidth = min(width / Double(columns), height / Double(rows) * aspect)
+            let area = imageWidth * imageWidth / aspect
+            if area > bestArea + 0.5 {
+                best = (columns, rows)
+                bestArea = area
+            }
+        }
+        return best
+    }
+}

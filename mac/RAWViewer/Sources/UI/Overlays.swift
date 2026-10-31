@@ -311,7 +311,7 @@ private struct OverlayPanel<Content: View>: View {
 struct HelpOverlay: View {
     let onClose: () -> Void
 
-    /// Verbatim from spec 01 §5, plus the Mac app additions (↑/↓, ⌥⌘0, ⇧⌘M, ⇧⌘N, ⇧S, F).
+    /// Verbatim from spec 01 §5, plus the Mac app additions (↑/↓, ⌥⌘0, ⇧⌘M, ⇧⌘N, ⇧S, V, F).
     static let text = """
       ←/→         Navigate images
       ↑/↓         Previous/next scene
@@ -336,6 +336,8 @@ struct HelpOverlay: View {
       ⌘S          Toggle filmstrip
       G            Toggle grid view
       ⇧S          Group by scene
+      V            Duel: ← / → keeps one, ↓ both
+      ⌘Z          Undo duel choice
       F            Toggle faces
       H            Toggle this help
       T            Toggle shoot stats
