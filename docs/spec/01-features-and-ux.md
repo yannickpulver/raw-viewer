@@ -573,9 +573,10 @@ top. The grid's vertical scroller is always visible (legacy style).
 Mac app addition: **stacks**. While Group by Scene is on (date orders only),
 multi-exposure brackets fold into one tile (`Stacks`): a frame joins the
 previous one's stack when it was shot at most 1 s later in the same subfolder
-and its EXIF exposure (shutter time and EV) differs from every frame already in
-it. Bursts at one exposure stay single frames; back-to-back brackets split
-where the exposure repeats. Exposure is read with the capture date and cached
+and its EXIF exposure compensation (EV) differs from every frame already in it.
+Shutter time alone does not count, since auto exposure drifts it between burst
+frames. Bursts stay single frames; back-to-back brackets split where the EV
+repeats. Exposure is read with the capture date and cached
 in `dates.json` as `[mtime, timestamp, exposureTime, exposureBias]` (older
 two-value entries are read again once). The cover is the frame closest to
 0 EV; grid and filmstrip draw a `⧉ 3` badge on it, the sidebar's Photo section

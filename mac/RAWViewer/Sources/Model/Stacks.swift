@@ -2,10 +2,12 @@ import Foundation
 
 /// Multi-exposure stacks: the frames of one bracket (HDR, exposure blending). Mac app
 /// addition, no Python-app equivalent. Cameras mark their brackets inconsistently (the
-/// Mavic 3 Pro writes "Manual"), so the rule only looks at time and exposure: a frame joins
-/// the previous one's stack when it was shot at most `maxGap` later on the same camera and its
-/// exposure differs from every frame already in the stack. A burst at one exposure therefore
-/// stays single frames, and back-to-back brackets split where the exposure repeats.
+/// Mavic 3 Pro writes "Manual"), so the rule only looks at time and exposure compensation: a
+/// frame joins the previous one's stack when it was shot at most `maxGap` later on the same
+/// camera and its EV differs from every frame already in the stack. Shutter time alone does
+/// not count: in auto exposure it drifts between burst frames (1/100 → 1/105 at the same
+/// +0.33 EV). A burst therefore stays single frames, and back-to-back brackets split where the
+/// EV repeats.
 public enum Stacks {
     public static let maxGap: TimeInterval = 1
 
@@ -14,7 +16,7 @@ public enum Stacks {
     public static func ranges(in files: [MediaFile], maxGap: TimeInterval = Stacks.maxGap) -> [Range<Int>] {
         var ranges: [Range<Int>] = []
         var start = 0
-        var exposures: Set<Exposure> = []
+        var biases: Set<Double> = []
         for index in files.indices {
             let file = files[index]
             let previous = index > start ? files[index - 1] : nil
@@ -22,13 +24,13 @@ public enum Stacks {
                let exposure = file.exposure, file.kind != .video,
                file.subfolder == previous.subfolder,
                abs(file.captureDate.timeIntervalSince(previous.captureDate)) <= maxGap,
-               !exposures.contains(exposure) {
-                exposures.insert(exposure)
+               !biases.contains(exposure.bias) {
+                biases.insert(exposure.bias)
                 continue
             }
             if index - start > 1 { ranges.append(start..<index) }
             start = index
-            exposures = file.exposure.map { [$0] } ?? []
+            biases = file.exposure.map { [$0.bias] } ?? []
         }
         if files.count - start > 1 { ranges.append(start..<files.count) }
         return ranges

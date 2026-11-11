@@ -361,27 +361,30 @@ struct GridView: NSViewRepresentable {
             coordinator.lastSelectionRevision = model.selectionRevision
             canvas.needsDisplay = true
         }
-        if coordinator.lastDayJump != model.dayJumpRevision {
+        // Scrolling needs the real size: SwiftUI can run this before the grid is laid out, and
+        // a scroll then would be lost for good.
+        let laidOut = scroll.contentSize.width > 0 && scroll.contentSize.height > 0
+        if laidOut, coordinator.lastDayJump != model.dayJumpRevision {
             // A day jump puts that day's header at the top. The grid's first appearance only
-            // takes the revision over and scrolls the current cell into view below.
+            // takes the revision over and centres the current cell below.
             if coordinator.lastDayJump >= 0, !model.groups.starts.isEmpty {
                 coordinator.lastIndex = model.index
                 let top = CGFloat(geometry.headerTop(scene: model.groups.scene(of: model.index)))
-                let clip = scroll.contentView
-                let origin = NSPoint(x: 0, y: top - CGFloat(geometry.spacing) - scroll.contentInsets.top)
-                clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
-                scroll.reflectScrolledClipView(clip)
+                Self.scroll(scroll, toY: top - CGFloat(geometry.spacing))
             }
             coordinator.lastDayJump = model.dayJumpRevision
         }
-        if coordinator.lastIndex != model.index, !model.groups.starts.isEmpty {
+        if laidOut, coordinator.lastIndex != model.index, !model.groups.starts.isEmpty {
+            // Coming from the single view the current cell sits in the middle; later moves
+            // only scroll as far as needed. The first row of a group brings its captions along.
+            let entering = coordinator.lastIndex < 0
             coordinator.lastIndex = model.index
-            // The first row of a group brings its captions into view with it.
             let origin = geometry.cellOrigin(index: model.index)
             let group = model.groups.scene(of: model.index)
             let header = model.index - model.groups.starts[group] < columns ? geometry.headers[group] : 0
-            canvas.scrollToVisible(NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y - header) - 2,
-                                          width: CGFloat(cell) + 4, height: CGFloat(cell + header) + 4))
+            let rect = NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y - header) - 2,
+                              width: CGFloat(cell) + 4, height: CGFloat(cell + header) + 4)
+            Self.reveal(rect, in: scroll, centered: entering)
         }
         // First real layout: no scroll has happened, so the visible range has never been
         // pushed and the first viewport would sit on 80 px thumbs until the user scrolls.
@@ -390,6 +393,34 @@ struct GridView: NSViewRepresentable {
             coordinator.schedule(visible: scroll.contentView.documentVisibleRect)
         }
         DispatchQueue.main.async { onLayout(columns) }
+    }
+
+    /// The part of the grid not under the toolbar: the scroll view runs underneath it, so its
+    /// top content inset is covered.
+    private static func visibleArea(of scroll: NSScrollView) -> (top: CGFloat, height: CGFloat) {
+        let bounds = scroll.contentView.bounds
+        let inset = scroll.contentInsets.top
+        return (bounds.minY + inset, bounds.height - inset)
+    }
+
+    /// Scrolls so the document's `y` sits right below the toolbar, clamped to the content.
+    private static func scroll(_ scroll: NSScrollView, toY y: CGFloat) {
+        let clip = scroll.contentView
+        let origin = NSPoint(x: clip.bounds.minX, y: y - scroll.contentInsets.top)
+        clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    /// Brings `rect` into the area below the toolbar: centred, or with the least scrolling.
+    private static func reveal(_ rect: NSRect, in scroll: NSScrollView, centered: Bool) {
+        let visible = visibleArea(of: scroll)
+        if centered {
+            Self.scroll(scroll, toY: rect.midY - visible.height / 2)
+        } else if rect.minY < visible.top {
+            Self.scroll(scroll, toY: rect.minY)
+        } else if rect.maxY > visible.top + visible.height {
+            Self.scroll(scroll, toY: rect.maxY - visible.height)
+        }
     }
 
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {

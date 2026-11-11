@@ -27,6 +27,17 @@ final class StacksTests: XCTestCase {
         XCTAssertEqual(Stacks.ranges(in: frames([(0, 0), (0.3, 0), (0.6, 0)])), [])
     }
 
+    /// Auto exposure moves the shutter between burst frames at the same EV (X100VI: 1/100,
+    /// then 1/105 at +0.33): that is no bracket.
+    func testShutterDriftAtTheSameEVIsNoStack() {
+        let drift = [1.0 / 100, 1.0 / 105].enumerated().map { index, time in
+            MediaFile(url: URL(fileURLWithPath: "/shoot/X/\(index).raf"), kind: .raw,
+                      captureDate: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)), subfolder: "X",
+                      exposure: Exposure(time: time, bias: 0.33))
+        }
+        XCTAssertEqual(Stacks.ranges(in: drift), [])
+    }
+
     func testGapsCamerasVideosAndMissingExposureBreakAStack() {
         XCTAssertEqual(Stacks.ranges(in: frames([(0, 0), (2, -1)])), [], "more than a second apart")
         let twoCameras = frames([(0, 0)], folder: "A") + frames([(0, -1)], folder: "B")
