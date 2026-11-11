@@ -1324,6 +1324,9 @@ public final class Library {
         return count > 0 ? "\(mode.buttonLabel) (\(count))" : mode.buttonLabel
     }
 
+    /// Files the mode's timeline holds right now.
+    public func modeFileCount(_ mode: ViewMode) -> Int { modeStates[mode]?.files.count ?? 0 }
+
     /// `ALL` only earns its button once it mixes at least two kinds; with one it would just
     /// repeat that kind's button.
     public func modeButtonVisible(_ mode: ViewMode) -> Bool {

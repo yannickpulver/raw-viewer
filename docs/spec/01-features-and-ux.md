@@ -174,7 +174,8 @@ from the window edges, reaching up into the toolbar row) beside the image area, 
 image ends to its left; the filmstrip keeps the full window width below it. While it is
 open, the toolbar's sidebar toggle drops its glass and sits in the panel's top-right corner. Three sections:
 
-- **Filter**: file kind (only with more than one kind), subfolders as a list (`All` first,
+- **Filter**: file kind (only with more than one kind; each segment shows its count
+  underneath), subfolders as a list (`All` first,
   right-click excludes), the rating filter (8 segments as below), the sort order and
   Group by Scene. Its title shares the toolbar row with the sidebar toggle.
 - **Photo**: position text, file name, capture date, five clickable stars (a click on the
@@ -584,7 +585,9 @@ each frame is rated alone. Lightroom, Resolve, Move Shown and the selection
 menu act on all frames of a collapsed stack. Day and scene captions and the
 Days list count frames, stacked ones included.
 
-The sidebar opens with a **Single / Grid** switch (same as `G`) and lists the
+The sidebar's segmented rows (Single / Grid, file kind, rating) are plain buttons
+that split the column evenly (`Segments`): AppKit's segmented control sometimes kept
+its natural width and pushed the column past the panel. The sidebar opens with a **Single / Grid** switch (same as `G`) and lists the
 **Days** (`Wed, 4 Nov` and the frame count, current day highlighted) whenever
 the timeline spans more than one day; a click jumps to that day.
 

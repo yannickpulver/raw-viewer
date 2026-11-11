@@ -40,10 +40,9 @@ struct Sidebar: View {
                     }
                 }
             }
-            // A fixed column: a scroll view sizes its content by the content's ideal width,
-            // so one wide control (a segmented picker cannot shrink) would widen every section
-            // past the panel's edges.
-            .frame(width: Theme.sidebarWidth - 2 * Self.contentPadding)
+            // Every control here shares the width it is given (`Segments`, lists, truncating
+            // text), so the column follows the panel, a permanent scroll bar included.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Self.contentPadding).padding(.bottom, 14).padding(.top, 4)
         }
         // Keys go through the app's dispatcher, so no control here should show a focus ring.
@@ -228,47 +227,34 @@ private struct FilterControls: View {
         SidebarRow(label: "Order") { orderControls }
     }
 
-    /// With counts while they fit the panel. A segmented control never shrinks, so a folder
-    /// with all four kinds (`ALL (2682) | RAW (2302) | …`) would push the whole column wider;
-    /// then the bare labels show and the counts move to the tooltip.
+    /// Each kind with its count underneath, so four kinds still fit the panel.
     private var modePicker: some View {
-        ViewThatFits(in: .horizontal) {
-            modeSegments(label: library.modeButtonLabel)
-            modeSegments(label: \.buttonLabel)
-                .help(visibleModes.map { library.modeButtonLabel($0) }.joined(separator: " · "))
+        // `switchViewMode(_:toggle: false)` is the mode-button semantics: a direct switch.
+        Segments(values: visibleModes, selected: library.viewMode,
+                 select: { library.switchViewMode($0, toggle: false) }, height: 30) { mode in
+            VStack(spacing: 0) {
+                Text(mode.buttonLabel)
+                Text(library.modeFileCount(mode).formatted())
+                    .font(.system(size: 9).monospacedDigit())
+                    .opacity(0.75)
+            }
         }
     }
 
-    private func modeSegments(label: @escaping (ViewMode) -> String) -> some View {
-        // `switchViewMode(_:toggle: false)` is the mode-button semantics: a direct switch.
-        Picker("Files", selection: Binding(get: { library.viewMode },
-                                           set: { library.switchViewMode($0, toggle: false) })) {
-            ForEach(visibleModes, id: \.self) { mode in
-                Text(label(mode)).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
-    }
+    private static let ratingValues = [0, RatingFilter.unratedValue, 1, 2, 3, 4, 5, -1]
 
     private var ratingPicker: some View {
         // `setRatingFilter` is async (it sweeps every rating off disk first).
-        Picker("Rating filter", selection: Binding(
-            get: { library.ratingFilter.value },
-            set: { value in Task { await library.setRatingFilter(value) } })) {
-            Text("All").tag(0)
-            Text("0").tag(RatingFilter.unratedValue)
-            Text("1+").tag(1)
-            Text("2+").tag(2)
-            Text("3+").tag(3)
-            Text("4+").tag(4)
-            Text("5").tag(5)
-            Image(systemName: "xmark").tag(-1)
+        Segments(values: Self.ratingValues, selected: library.ratingFilter.value,
+                 select: { value in Task { await library.setRatingFilter(value) } }) { value in
+            switch value {
+            case 0: Text("All")
+            case RatingFilter.unratedValue: Text("0")
+            case -1: Image(systemName: "xmark")
+            case 5: Text("5")
+            default: Text("\(value)+")
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
     }
 
     @ViewBuilder
@@ -342,13 +328,10 @@ private struct DisplaySwitch: View {
     let library: Library
 
     var body: some View {
-        Picker("Display", selection: Binding(get: { library.displayMode == .grid },
-                                             set: { library.showGrid($0) })) {
-            Label("Single", systemImage: "photo").tag(false)
-            Label("Grid", systemImage: "square.grid.2x2").tag(true)
+        Segments(values: [false, true], selected: library.displayMode == .grid,
+                 select: { library.showGrid($0) }, height: 24) { grid in
+            Label(grid ? "Grid" : "Single", systemImage: grid ? "square.grid.2x2" : "photo")
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
         .help("Single image or grid (G)")
     }
 }
@@ -426,5 +409,39 @@ private struct StackRow: View {
                 .controlSize(.small)
                 .help("Show every frame of the stack, or fold it into one (K)")
         }
+    }
+}
+
+// MARK: - Segments
+
+/// A segmented control that always splits the width it is given. AppKit's segmented control
+/// sometimes keeps its natural width instead of shrinking, which pushed the whole sidebar
+/// column wider than the panel; these buttons share the width evenly and never ask for more.
+private struct Segments<Value: Hashable, Content: View>: View {
+    let values: [Value]
+    let selected: Value
+    let select: (Value) -> Void
+    var height: CGFloat = 20
+    @ViewBuilder let label: (Value) -> Content
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(values, id: \.self) { value in
+                let isSelected = value == selected
+                Button { select(value) } label: {
+                    label(value)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.85))
+                        .frame(maxWidth: .infinity, minHeight: height)
+                        .background(isSelected ? Color.accentColor : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }
