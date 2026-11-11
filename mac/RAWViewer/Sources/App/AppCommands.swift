@@ -39,7 +39,7 @@ struct AppCommands: Commands {
                 }
             }
             Divider()
-            Button(Self.title("Close Folder", "Esc")) { model.escape() }
+            Button("Close Folder") { library.closeFolder() }
             Divider()
             Button(Self.title("Reveal in Finder", "O")) { library.revealInFinder() }
                 .disabled(!model.filesLoaded)
@@ -103,6 +103,15 @@ struct AppCommands: Commands {
                 .disabled(library.scenes == nil)
             Button(Self.title("Previous Scene", "↑")) { library.navigateScene(by: -1) }
                 .disabled(library.scenes == nil)
+            // Mac app addition: no Python-app equivalent.
+            Button(Self.title("Next Day", "⌥↓")) { library.navigateDay(by: 1) }
+                .disabled((library.days?.count ?? 0) < 2)
+            Button(Self.title("Previous Day", "⌥↑")) { library.navigateDay(by: -1) }
+                .disabled((library.days?.count ?? 0) < 2)
+            Button(Self.title(library.isCurrentStackExpanded ? "Collapse Stack" : "Expand Stack", "K")) {
+                library.toggleStack()
+            }
+            .disabled(library.currentStack == nil)
         }
 
         CommandGroup(replacing: .toolbar) {
@@ -134,6 +143,9 @@ struct AppCommands: Commands {
             Toggle(Self.title("Group by Scene", "⇧S"), isOn: Binding(get: { library.groupScenes },
                                                                      set: { _ in library.toggleScenes() }))
                 .disabled(library.sortOrder == .bestFaces)
+            // Mac app addition: no Python-app equivalent.
+            Toggle(Self.title("Unviewed Only", "U"), isOn: Binding(get: { library.unviewedOnly },
+                                                                   set: { _ in library.toggleUnviewed() }))
             Divider()
             Button(Self.title("Rotate 90°", "R")) { model.rotate() }
                 .disabled(!model.filesLoaded || model.showsVideo)

@@ -33,7 +33,34 @@ public struct Scenes: Equatable, Sendable {
         self.starts = starts
     }
 
+    /// Cuts wherever the calendar day changes: the grid's day sections. Either date order.
+    public init(days files: [MediaFile], calendar: Calendar = .current) {
+        total = files.count
+        guard !files.isEmpty else {
+            starts = []
+            return
+        }
+        var starts = [0]
+        for index in files.indices.dropFirst()
+        where !calendar.isDate(files[index].captureDate, inSameDayAs: files[index - 1].captureDate) {
+            starts.append(index)
+        }
+        self.starts = starts
+    }
+
+    /// Every cut of both, so a scene running past midnight splits at the day.
+    public init(merging first: Scenes, _ second: Scenes) {
+        total = max(first.total, second.total)
+        starts = Array(Set(first.starts).union(second.starts)).sorted()
+    }
+
     public var count: Int { starts.count }
+
+    /// Whether a group starts at `index`.
+    public func starts(at index: Int) -> Bool {
+        guard !starts.isEmpty else { return false }
+        return starts[scene(of: index)] == index
+    }
 
     /// The scene holding `index`, by binary search over `starts`.
     public func scene(of index: Int) -> Int {

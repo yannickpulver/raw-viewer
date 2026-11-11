@@ -21,6 +21,7 @@ public enum AppPaths {
     public static var faceCacheDirectory: URL { cachesDirectory.appendingPathComponent("faces", isDirectory: true) }
     public static var shootStatsFile: URL { applicationSupportDirectory.appendingPathComponent("shoot_stats.json") }
     public static var folderSummariesFile: URL { applicationSupportDirectory.appendingPathComponent("folder_summaries.json") }
+    public static var viewedDirectory: URL { applicationSupportDirectory.appendingPathComponent("viewed", isDirectory: true) }
 
     /// Legacy Python locations, imported once on first launch. Spec 07 §11.
     public static var legacyCacheDirectory: URL {

@@ -12,7 +12,7 @@ public final class AppModel {
 
     public static let shared = AppModel()
 
-    public let library = Library()
+    public let library: Library
     let video = VideoController()
 
     /// Checks the appcast at launch and every 24h, and shows Sparkle's own dialog. Local builds
@@ -38,7 +38,10 @@ public final class AppModel {
     var faceFocus: CGRect?
     var statsTick = 0
 
-    private init() {}
+    /// The app uses `shared`; tests pass a `Library` with temporary stores.
+    init(library: Library? = nil) {
+        self.library = library ?? Library()
+    }
 
     var filesLoaded: Bool { !library.files.isEmpty }
     /// The current file is a video: in MOV mode, or a clip inside ALL.
@@ -93,13 +96,16 @@ public final class AppModel {
 
     /// Spec 02 §1-2, plus the mac app's overlays and multi-selection: help → stats →
     /// multi-selection → grid → duel → compare → close the folder.
+    /// One level up per press: overlay, multi-selection, duel or compare, then the single
+    /// view goes to the grid and the grid back to the start screen. Mac app change: the single
+    /// view used to close the folder and the grid to return to the single view.
     func escape() {
         if showHelp { showHelp = false; return }
         if showStats { showStats = false; return }
         if library.clearMultiSelection() { return }
-        if isGrid { library.toggleGrid(); return }
         if library.displayMode == .duel { library.toggleDuel(); return }
         if library.isCompareActive { library.exitCompare(); return }
+        if library.displayMode == .single, !library.files.isEmpty { library.showGrid(true); return }
         library.closeFolder()
     }
 
@@ -161,6 +167,8 @@ public final class AppModel {
         static let escape: UInt16 = 53
         static let space: UInt16 = 49
         static let backspace: UInt16 = 51
+        static let pageUp: UInt16 = 116
+        static let pageDown: UInt16 = 121
         /// Top-row `0`-`5` on the physical keyboard, so non-US layouts rate correctly.
         static let digits: [UInt16: Int] = [29: 0, 18: 1, 19: 2, 20: 3, 21: 4, 23: 5]
     }
@@ -200,6 +208,16 @@ public final class AppModel {
             }
             if command, characters == "z" { library.undoDuel(); return true }
             if bare, characters == "x" || digit(keyCode: key, characters: characters) != nil { return true }
+        }
+
+        // Mac app addition: days, in the grid and the single view alike.
+        if modifiers == .option, key == KeyCode.down || key == KeyCode.up {
+            library.navigateDay(by: key == KeyCode.down ? 1 : -1)
+            return true
+        }
+        if key == KeyCode.pageDown || key == KeyCode.pageUp {
+            library.navigateDay(by: key == KeyCode.pageDown ? 1 : -1)
+            return true
         }
 
         // Grid mode gets first refusal.
@@ -260,6 +278,8 @@ public final class AppModel {
             case "f": library.toggleFaces(); return true
             // Mac app addition: no Python-app equivalent.
             case "v": library.toggleDuel(); return true
+            case "u": library.toggleUnviewed(); return true
+            case "k": if filesLoaded { library.toggleStack() }; return true
             default: break
             }
         }

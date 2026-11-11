@@ -6,6 +6,8 @@ public enum GridLayout {
     public static let spacing: Int = 6
     /// Band above each scene for its caption while scenes are grouped.
     public static let sceneHeader: Int = 26
+    /// Band above each day: the grid's sections in the date orders.
+    public static let dayHeader: Int = 40
 
     /// Python's floor division, which differs from Swift's truncating `/` for negatives.
     @inline(__always)
@@ -26,14 +28,14 @@ public enum GridLayout {
     }
 }
 
-/// Where every grid cell sits. Each scene starts on a new row, with a `header` band above it
-/// for its caption. One scene and no header is the plain grid of spec 01 §8, with the
-/// clamping rules of spec 02 §2.
+/// Where every grid cell sits. Each group (a day, a scene, or both) starts on a new row, with
+/// a band of `headers[group]` above it for its captions. One group and no header is the plain
+/// grid of spec 01 §8, with the clamping rules of spec 02 §2.
 public struct GridGeometry {
     public let columns: Int
     public let cell: Int
     public let spacing: Int
-    public let header: Int
+    public let headers: [Int]
     public let scenes: Scenes
     public let contentHeight: Int
     /// First file index and top edge of every row, top to bottom.
@@ -42,17 +44,25 @@ public struct GridGeometry {
     /// The row each scene opens with.
     private let sceneRows: [Int]
 
+    /// The same `header` above every group.
     public init(scenes: Scenes, columns: Int, cell: Int = GridLayout.cell,
                 spacing: Int = GridLayout.spacing, header: Int = 0) {
+        self.init(scenes: scenes, headers: Array(repeating: header, count: scenes.count),
+                  columns: columns, cell: cell, spacing: spacing)
+    }
+
+    public init(scenes: Scenes, headers: [Int], columns: Int, cell: Int = GridLayout.cell,
+                spacing: Int = GridLayout.spacing) {
+        precondition(headers.count == scenes.count)
         self.columns = max(1, columns)
         self.cell = cell
         self.spacing = spacing
-        self.header = header
+        self.headers = headers
         self.scenes = scenes
         var starts: [Int] = [], tops: [Int] = [], sceneRows: [Int] = []
         var y = spacing
         for scene in 0..<scenes.count {
-            y += header
+            y += headers[scene]
             sceneRows.append(starts.count)
             let range = scenes.range(of: scene)
             for start in Swift.stride(from: range.lowerBound, to: range.upperBound, by: self.columns) {
@@ -97,9 +107,9 @@ public struct GridGeometry {
         return (spacing + (index - rowStarts[row]) * stride, rowTops[row])
     }
 
-    /// Top edge of a scene's caption band.
+    /// Top edge of a group's caption band.
     public func headerTop(scene: Int) -> Int {
-        rowTops[sceneRows[scene]] - header
+        rowTops[sceneRows[scene]] - headers[scene]
     }
 
     /// Index under a point, or -1 when the point is past the last column / item of its row,

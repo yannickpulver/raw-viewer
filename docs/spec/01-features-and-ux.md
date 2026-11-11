@@ -174,7 +174,8 @@ from the window edges, reaching up into the toolbar row) beside the image area, 
 image ends to its left; the filmstrip keeps the full window width below it. While it is
 open, the toolbar's sidebar toggle drops its glass and sits in the panel's top-right corner. Three sections:
 
-- **Filter**: file kind (only with more than one kind), subfolders as a list (`All` first,
+- **Filter**: file kind (only with more than one kind; each segment shows its count
+  underneath), subfolders as a list (`All` first,
   right-click excludes), the rating filter (8 segments as below), the sort order and
   Group by Scene. Its title shares the toolbar row with the sidebar toggle.
 - **Photo**: position text, file name, capture date, five clickable stars (a click on the
@@ -557,6 +558,57 @@ respects the rating filter, so `⌘1` then `V` is a second pass over the picks.
   next scene; `R` rotates the newest frame only
 - rating keys and `X` do nothing; compare (`C`) is refused; a filter, sort,
   mode or grid change ends the duel; `Esc` returns to the single view
+
+Mac app addition: **days in the grid**. In the date orders the grid is cut into
+days (`ModeState.days`, calendar day of the capture date): every day starts on a
+new row under a 40 px band `Wednesday, 4 November  ·  312 frames  ·  12 picked`
+(year shown when not this year). With Group by Scene on, scenes cut the days
+further (`ModeState.gridGroups`); a scene band then reads `15:27  ·  7 frames`,
+stacked under the day band when a day opens with a scene. Best Faces keeps one
+flat grid. `⌥↓` / `⌥↑` (also Page Down / Page Up, View menu) jump to the next /
+previous day start in the grid and the single view (back from mid-day goes to
+the day's start first); in the grid a day jump scrolls the day's band to the
+top. The grid's vertical scroller is always visible (legacy style).
+
+Mac app addition: **stacks**. While Group by Scene is on (date orders only),
+multi-exposure brackets fold into one tile (`Stacks`): a frame joins the
+previous one's stack when it was shot at most 1 s later in the same subfolder
+and its EXIF exposure compensation (EV) differs from every frame already in it.
+Shutter time alone does not count, since auto exposure drifts it between burst
+frames. Bursts stay single frames; back-to-back brackets split where the EV
+repeats. Exposure is read with the capture date and cached
+in `dates.json` as `[mtime, timestamp, exposureTime, exposureBias]` (older
+two-value entries are read again once). The cover is the frame closest to
+0 EV; grid and filmstrip draw a `⧉ 3` badge on it, the sidebar's Photo section
+shows `Stack of 3 · 0, −0.7, +0.7 EV` with Expand / Collapse, and `K` (View
+menu) toggles it. Rating a collapsed stack rates every frame; once expanded,
+each frame is rated alone. Lightroom, Resolve, Move Shown and the selection
+menu act on all frames of a collapsed stack. Day and scene captions and the
+Days list count frames, stacked ones included.
+
+The sidebar's segmented rows (Single / Grid, file kind, rating) are plain buttons
+that split the column evenly (`Segments`): AppKit's segmented control sometimes kept
+its natural width and pushed the column past the panel. The sidebar opens with a **Single / Grid** switch (same as `G`) and lists the
+**Days** (`Wed, 4 Nov` and the frame count, current day highlighted) whenever
+the timeline spans more than one day; a click jumps to that day.
+
+Mac app addition: **Unviewed Only** (`U`, View menu, sidebar checkbox
+`Unviewed only (N)`, not persisted). A file counts as viewed once it is the
+current file in the single view, the duel or compare; grid cells do not count.
+The filter hides the files viewed in *earlier* sessions of this folder: the
+viewed set is read once at folder open, so files viewed now stay in the list
+until the folder is opened again. It combines with the rating and subfolder
+filters; the counter reads `7/42  (unviewed)`.
+
+Mac app addition: **resume**. Opening a folder again starts on the file and in
+the mode (RAW / JPEG / Video / All) where the last visit ended; when that file
+is gone it starts at the beginning as before (spec 01 §10). A rescan of the open
+folder (after a move) keeps the file on screen.
+
+Views and the position are kept per folder in
+`~/Library/Application Support/RAW Viewer/viewed/<sha256 of folder path>.json`
+as `{"viewed": [...], "last": "...", "mode": "raw"}` (paths relative to the
+folder), written 2 s after the last move and on folder close and quit.
 
 ---
 

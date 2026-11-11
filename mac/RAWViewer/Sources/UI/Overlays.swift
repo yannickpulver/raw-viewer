@@ -14,7 +14,7 @@ struct MainToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         if library.folder != nil {
-            // Same ladder as `Esc`: grid → single, compare → single, otherwise back to the dashboard.
+            // Same ladder as `Esc`: duel / compare → single → grid → back to the dashboard.
             ToolbarItem(placement: .navigation) {
                 Button { model.escape() } label: {
                     Label("Back", systemImage: "chevron.left")
@@ -167,14 +167,16 @@ private struct OverlayPanel<Content: View>: View {
 struct HelpOverlay: View {
     let onClose: () -> Void
 
-    /// Verbatim from spec 01 §5, plus the Mac app additions (↑/↓, ⌥⌘0, ⇧⌘M, ⇧⌘N, ⇧S, V, F).
+    /// Verbatim from spec 01 §5, plus the Mac app additions (↑/↓, ⌥↑/⌥↓, ⌥⌘0, U, K, ⇧⌘M, ⇧⌘N, ⇧S, V, F).
     static let text = """
       ←/→         Navigate images
       ↑/↓         Previous/next scene
+      ⌥↑/⌥↓     Previous/next day (also Page Up/Down)
       0-5          Rate current image
       X            Reject (toggle)
       ⌘0-5        Filter by rating
       ⌥⌘0         Filter unrated
+      U            Unviewed only (not seen before)
       ⌘⌫          Move rejected to _rejected/
       ⇧⌘M         Move shown files to folder…
       ⇧⌘N         Toggle newest first
@@ -191,7 +193,8 @@ struct HelpOverlay: View {
       I            Toggle sidebar
       ⌘S          Toggle filmstrip
       G            Toggle grid view
-      ⇧S          Group by scene
+      ⇧S          Group by scene (and stacks)
+      K            Expand/collapse stack
       V            Duel: ← / → keeps one, ↓ both
       ⌘Z          Undo duel choice
       F            Toggle faces
@@ -202,7 +205,7 @@ struct HelpOverlay: View {
       O            Show in Finder
       ⌘L          Open all in Lightroom
       ⌘D          Export to DaVinci Resolve
-      Esc          Close overlay, selection, grid, then folder
+      Esc          Up a level: single → grid → close folder
       ⌘Q          Quit
 
       ⇧Click       Select range (grid/filmstrip)

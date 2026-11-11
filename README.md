@@ -25,7 +25,10 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Sort oldest first, newest first, or by best faces (most sharp, open-eyed faces first)
 - Video mode (MOV/MP4 playback)
 - All mode: RAW, JPEG and video in one timeline
-- Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip
+- Grid grouped by day, with a day list in the sidebar to jump between days (`Option+↑/↓`)
+- Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip; exposure brackets (HDR) fold into one stack tile, rated together (`K` expands)
+- Reopening a folder continues at the photo where you left off
+- Unviewed only: show just the frames no earlier session opened; what you view now stays in the list
 - Duel: two frames of a scene side by side with shared zoom; keep one or both until the scene's best get 2★ (`Cmd+1`, then `V`)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
@@ -61,13 +64,16 @@ python main.py "/path/to/photos"
 |-----|--------|
 | `←` `→` | Previous / Next image |
 | `↑` `↓` | Previous / Next scene (while grouped by scene) |
+| `Option+↑` `Option+↓` | Previous / Next day (also Page Up / Page Down) |
 | `0-5` | Set rating (auto-advances) |
 | `Cmd+0-5` | Filter by minimum rating |
 | `S` | Jump to first (start) |
 | `E` | Jump to last (end) |
 | `Shift+R` | Jump to last rated |
-| `Shift+S` | Group by scene |
+| `Shift+S` | Group by scene (and stacks) |
+| `K` | Expand / collapse stack |
 | `V` | Duel: `←` / `→` keeps one, `↓` both, `Cmd+Z` undoes |
+| `U` | Unviewed only (not opened in an earlier session) |
 | `R` | Rotate image 90° (view only) |
 | `I` | Toggle sidebar |
 | `F` | Show / hide faces (needs face detection on) |
@@ -80,7 +86,7 @@ python main.py "/path/to/photos"
 | `Cmd+L` | Open in Lightroom |
 | `Cmd+D` | Export to DaVinci Resolve |
 | `Cmd+S` | Toggle filmstrip |
-| `Esc` | Close folder |
+| `Esc` | Up a level: single image → grid → close folder |
 | `Cmd+Q` / `Cmd+W` | Quit |
 
 Pinch to zoom, drag to pan, two-finger swipe to navigate. Scroll wheel on filmstrip.

@@ -5,8 +5,14 @@ struct GridModel {
     var files: [MediaFile]
     var index: Int
     var ratings: [URL: Int]
-    /// `nil` while scenes are not grouped: one plain grid.
+    /// `nil` while scenes are not grouped.
     var scenes: Scenes?
+    /// `nil` under Best Faces: then the grid is one plain list (scenes are off there too).
+    var days: Scenes?
+    /// The sections drawn: days and scenes merged (`ModeState.gridGroups`).
+    var groups: Scenes
+    /// `Library.dayJumpRevision`: a change scrolls the current day's header to the top.
+    var dayJumpRevision: Int
     var thumbRevision: Int
     /// See `FilmstripModel.ratingsRevision`: a value change is invisible to `ratings.count`.
     var ratingsRevision: Int
@@ -22,6 +28,49 @@ struct GridModel {
     var selectedURLs: () -> [URL]
     var thumb200: (URL) -> CGImage?
     var thumb80: (URL) -> CGImage?
+    /// Frames behind a collapsed stack's cover (`Library.collapsedStackSize`), 0 otherwise.
+    var stackSize: (URL) -> Int
+}
+
+/// The `⧉ 3` pill in the top-right corner of a collapsed stack's cover.
+enum StackBadge {
+    static func draw(count: Int, cellX: CGFloat, cellY: CGFloat, side: CGFloat, compact: Bool) {
+        guard count > 1 else { return }
+        let fontSize: CGFloat = compact ? 9 : 11
+        let text = NSAttributedString(string: "\(count)", attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let config = NSImage.SymbolConfiguration(pointSize: fontSize, weight: .semibold)
+            .applying(.init(paletteColors: [.white]))
+        let symbol = NSImage(systemSymbolName: "square.stack.fill", accessibilityDescription: "Stack")?
+            .withSymbolConfiguration(config)
+        let textSize = text.size()
+        let symbolSize = symbol?.size ?? .zero
+        let height = (compact ? 14 : 18) as CGFloat
+        let padding = (compact ? 4 : 6) as CGFloat
+        let width = padding * 2 + symbolSize.width + 3 + textSize.width
+        let inset = (compact ? 3 : 6) as CGFloat
+        let pill = NSRect(x: cellX + side - width - inset, y: cellY + inset, width: width, height: height)
+        NSColor(white: 0, alpha: 0.65).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: height / 2, yRadius: height / 2).fill()
+        symbol?.draw(in: NSRect(x: pill.minX + padding, y: pill.midY - symbolSize.height / 2,
+                                width: symbolSize.width, height: symbolSize.height),
+                     from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        text.draw(at: NSPoint(x: pill.minX + padding + symbolSize.width + 3, y: pill.midY - textSize.height / 2))
+    }
+}
+
+extension GridModel {
+    func startsDay(_ group: Int) -> Bool { days?.starts(at: groups.starts[group]) ?? false }
+    func startsScene(_ group: Int) -> Bool { scenes?.starts(at: groups.starts[group]) ?? false }
+
+    /// A day band, a scene band, or both stacked when a day opens with a new scene.
+    var headers: [Int] {
+        (0..<groups.count).map {
+            (startsDay($0) ? GridLayout.dayHeader : 0) + (startsScene($0) ? GridLayout.sceneHeader : 0)
+        }
+    }
 }
 
 /// Custom-drawn grid. Spec 01 §8; all geometry comes from `GridLayout`.
@@ -81,6 +130,8 @@ final class GridCanvasView: NSView {
                 context.stroke(CGRect(x: x - 2, y: y - 2, width: side + 4, height: side + 4).insetBy(dx: 1.5, dy: 1.5))
             }
 
+            StackBadge.draw(count: model.stackSize(file.url), cellX: x, cellY: y, side: side, compact: false)
+
             let rating = model.ratings[file.url] ?? 0
             if rating > 0 {
                 context.setFillColor(NSColor(red: 1, green: 200.0 / 255.0, blue: 50.0 / 255.0, alpha: 1).cgColor)
@@ -101,26 +152,64 @@ final class GridCanvasView: NSView {
         }
     }
 
-    /// `Sat, 20 Sep · 11:50 · 6 frames · 2 picked` in the band above each visible scene. The
-    /// scene after the last visible cell is included, since its band can show before its row.
+    /// Above each visible group: the day band (`Wednesday, 4 November  ·  312 frames  ·
+    /// 12 picked`), then the scene band (`15:27  ·  6 frames  ·  2 picked`) when scenes are
+    /// grouped. The group after the last visible cell is included, since its band can show
+    /// before its row.
     private func drawSceneCaptions(_ model: GridModel, first: Int, last: Int, dirtyRect: NSRect) {
-        guard let scenes = model.scenes, geometry.header > 0 else { return }
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor(white: 170.0 / 255.0, alpha: 1),
-        ]
-        for scene in scenes.scene(of: first)...min(scenes.count - 1, scenes.scene(of: last) + 1) {
-            let top = CGFloat(geometry.headerTop(scene: scene))
-            guard top < dirtyRect.maxY, top + CGFloat(geometry.header) > dirtyRect.minY else { continue }
-            let range = scenes.range(of: scene)
-            let picked = model.files[range].filter { (model.ratings[$0.url] ?? 0) > 0 }.count
-            var parts = [Library.formatCaptureDate(model.files[range.lowerBound].captureDate),
-                         range.count == 1 ? "1 frame" : "\(range.count) frames"]
-            if picked > 0 { parts.append("\(picked) picked") }
-            let text = NSAttributedString(string: parts.joined(separator: "  ·  "), attributes: attributes)
-            let inset: CGFloat = (CGFloat(geometry.header) - text.size().height) / 2 + 2
-            text.draw(at: NSPoint(x: CGFloat(geometry.spacing + 2), y: top + inset))
+        let groups = model.groups
+        guard !groups.starts.isEmpty else { return }
+        for group in groups.scene(of: first)...min(groups.count - 1, groups.scene(of: last) + 1) {
+            var top = CGFloat(geometry.headerTop(scene: group))
+            guard geometry.headers[group] > 0, top < dirtyRect.maxY,
+                  top + CGFloat(geometry.headers[group]) > dirtyRect.minY else { continue }
+            let start = groups.starts[group]
+            if model.startsDay(group), let days = model.days {
+                let range = days.range(of: days.scene(of: start))
+                drawCaption(title: Self.formatDay(model.files[start].captureDate),
+                            detail: counts(model, range), top: top, height: GridLayout.dayHeader,
+                            titleFont: .systemFont(ofSize: 15, weight: .semibold), titleWhite: 1)
+                top += CGFloat(GridLayout.dayHeader)
+            }
+            if model.startsScene(group), let scenes = model.scenes {
+                let range = scenes.range(of: scenes.scene(of: start))
+                let time = model.files[start].captureDate.formatted(date: .omitted, time: .shortened)
+                drawCaption(title: time, detail: counts(model, range), top: top, height: GridLayout.sceneHeader,
+                            titleFont: .systemFont(ofSize: 11, weight: .medium), titleWhite: 170.0 / 255.0)
+            }
         }
+    }
+
+    /// Frames, not tiles: a collapsed stack counts every frame it holds.
+    private func counts(_ model: GridModel, _ range: Range<Int>) -> String {
+        let frames = model.files[range].reduce(0) { $0 + max(1, model.stackSize($1.url)) }
+        let picked = model.files[range].reduce(0) {
+            $0 + ((model.ratings[$1.url] ?? 0) > 0 ? max(1, model.stackSize($1.url)) : 0)
+        }
+        var parts = [frames == 1 ? "1 frame" : "\(frames) frames"]
+        if picked > 0 { parts.append("\(picked) picked") }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private func drawCaption(title: String, detail: String, top: CGFloat, height: Int,
+                             titleFont: NSFont, titleWhite: CGFloat) {
+        let text = NSMutableAttributedString(string: title, attributes: [
+            .font: titleFont,
+            .foregroundColor: NSColor(white: titleWhite, alpha: 1),
+        ])
+        text.append(NSAttributedString(string: "  ·  " + detail, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor(white: 140.0 / 255.0, alpha: 1),
+        ]))
+        let inset: CGFloat = (CGFloat(height) - text.size().height) / 2 + 2
+        text.draw(at: NSPoint(x: CGFloat(geometry.spacing + 2), y: top + inset))
+    }
+
+    /// `Wednesday, 4 November`, with the year when it is not this year.
+    static func formatDay(_ date: Date, now: Date = Date()) -> String {
+        var style = Date.FormatStyle().weekday(.wide).day().month(.wide)
+        if !Calendar.current.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
+        return date.formatted(style)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -160,7 +249,8 @@ final class GridCanvasView: NSView {
             urls = model.selectedURLs()
         } else {
             onClick?(index, [])
-            urls = [model.files[index].url]
+            // The selection is now just that cell, a collapsed stack resolved into its frames.
+            urls = model.selectedURLs()
         }
 
         let origin = geometry.cellOrigin(index: index)
@@ -188,6 +278,7 @@ struct GridView: NSViewRepresentable {
         var lastCount = -1
         var lastRatingsRevision = -1
         var lastSelectionRevision = -1
+        var lastDayJump = -1
         var pushedInitialRange = false
 
         @objc func boundsChanged(_ note: Notification) {
@@ -217,7 +308,9 @@ struct GridView: NSViewRepresentable {
         scroll.documentView = canvas
         scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
-        scroll.scrollerStyle = .overlay
+        // Always visible, so the scroll position (and how far the days run) shows at a glance.
+        scroll.scrollerStyle = .legacy
+        scroll.autohidesScrollers = false
         scroll.scrollerKnobStyle = .light
         scroll.drawsBackground = true
         scroll.backgroundColor = NSColor(white: 20.0 / 255.0, alpha: 1)
@@ -241,8 +334,7 @@ struct GridView: NSViewRepresentable {
         let width = Int(scroll.contentSize.width)
         let columns = GridLayout.columns(forWidth: width)
         let cell = GridLayout.cellSize(forWidth: width, columns: columns)
-        let geometry = GridGeometry(scenes: model.scenes ?? Scenes(total: model.files.count), columns: columns,
-                                    cell: cell, header: model.scenes == nil ? 0 : GridLayout.sceneHeader)
+        let geometry = GridGeometry(scenes: model.groups, headers: model.headers, columns: columns, cell: cell)
         let height = geometry.contentHeight
 
         canvas.model = model
@@ -269,14 +361,30 @@ struct GridView: NSViewRepresentable {
             coordinator.lastSelectionRevision = model.selectionRevision
             canvas.needsDisplay = true
         }
-        if coordinator.lastIndex != model.index {
+        // Scrolling needs the real size: SwiftUI can run this before the grid is laid out, and
+        // a scroll then would be lost for good.
+        let laidOut = scroll.contentSize.width > 0 && scroll.contentSize.height > 0
+        if laidOut, coordinator.lastDayJump != model.dayJumpRevision {
+            // A day jump puts that day's header at the top. The grid's first appearance only
+            // takes the revision over and centres the current cell below.
+            if coordinator.lastDayJump >= 0, !model.groups.starts.isEmpty {
+                coordinator.lastIndex = model.index
+                let top = CGFloat(geometry.headerTop(scene: model.groups.scene(of: model.index)))
+                Self.scroll(scroll, toY: top - CGFloat(geometry.spacing))
+            }
+            coordinator.lastDayJump = model.dayJumpRevision
+        }
+        if laidOut, coordinator.lastIndex != model.index, !model.groups.starts.isEmpty {
+            // Coming from the single view the current cell sits in the middle; later moves
+            // only scroll as far as needed. The first row of a group brings its captions along.
+            let entering = coordinator.lastIndex < 0
             coordinator.lastIndex = model.index
-            // The first row of a scene brings its caption into view with it.
             let origin = geometry.cellOrigin(index: model.index)
-            let onFirstRow = model.scenes.map { model.index - $0.starts[$0.scene(of: model.index)] < columns } ?? false
-            let header = onFirstRow ? geometry.header : 0
-            canvas.scrollToVisible(NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y - header) - 2,
-                                          width: CGFloat(cell) + 4, height: CGFloat(cell + header) + 4))
+            let group = model.groups.scene(of: model.index)
+            let header = model.index - model.groups.starts[group] < columns ? geometry.headers[group] : 0
+            let rect = NSRect(x: CGFloat(origin.x) - 2, y: CGFloat(origin.y - header) - 2,
+                              width: CGFloat(cell) + 4, height: CGFloat(cell + header) + 4)
+            Self.reveal(rect, in: scroll, centered: entering)
         }
         // First real layout: no scroll has happened, so the visible range has never been
         // pushed and the first viewport would sit on 80 px thumbs until the user scrolls.
@@ -285,6 +393,34 @@ struct GridView: NSViewRepresentable {
             coordinator.schedule(visible: scroll.contentView.documentVisibleRect)
         }
         DispatchQueue.main.async { onLayout(columns) }
+    }
+
+    /// The part of the grid not under the toolbar: the scroll view runs underneath it, so its
+    /// top content inset is covered.
+    private static func visibleArea(of scroll: NSScrollView) -> (top: CGFloat, height: CGFloat) {
+        let bounds = scroll.contentView.bounds
+        let inset = scroll.contentInsets.top
+        return (bounds.minY + inset, bounds.height - inset)
+    }
+
+    /// Scrolls so the document's `y` sits right below the toolbar, clamped to the content.
+    private static func scroll(_ scroll: NSScrollView, toY y: CGFloat) {
+        let clip = scroll.contentView
+        let origin = NSPoint(x: clip.bounds.minX, y: y - scroll.contentInsets.top)
+        clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: origin, size: clip.bounds.size)).origin)
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    /// Brings `rect` into the area below the toolbar: centred, or with the least scrolling.
+    private static func reveal(_ rect: NSRect, in scroll: NSScrollView, centered: Bool) {
+        let visible = visibleArea(of: scroll)
+        if centered {
+            Self.scroll(scroll, toY: rect.midY - visible.height / 2)
+        } else if rect.minY < visible.top {
+            Self.scroll(scroll, toY: rect.minY)
+        } else if rect.maxY > visible.top + visible.height {
+            Self.scroll(scroll, toY: rect.maxY - visible.height)
+        }
     }
 
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {

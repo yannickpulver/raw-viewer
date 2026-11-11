@@ -13,14 +13,21 @@ struct Sidebar: View {
     /// Without a toolbar row it falls back into the list.
     private var titleInToolbarRow: Bool { toolbarHeight >= 20 }
 
+    private static let contentPadding: CGFloat = 14
     private static let filterTitle = "Filter"
     private static let filterSymbol = "line.3.horizontal.decrease"
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                DisplaySwitch(library: library)
                 SidebarSection(title: titleInToolbarRow ? nil : Self.filterTitle, symbol: Self.filterSymbol) {
                     FilterControls(library: library)
+                }
+                if library.dayList.count > 1 {
+                    SidebarSection(title: "Days", symbol: "calendar") {
+                        DayList(library: library)
+                    }
                 }
                 if let file = library.currentFile {
                     SidebarSection(title: "Photo", symbol: "photo") {
@@ -33,7 +40,10 @@ struct Sidebar: View {
                     }
                 }
             }
-            .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 4)
+            // Every control here shares the width it is given (`Segments`, lists, truncating
+            // text), so the column follows the panel, a permanent scroll bar included.
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Self.contentPadding).padding(.bottom, 14).padding(.top, 4)
         }
         // Keys go through the app's dispatcher, so no control here should show a focus ring.
         .focusEffectDisabled()
@@ -147,6 +157,9 @@ private struct PhotoInfo: View {
                 .foregroundStyle(.secondary)
         }
         .lineLimit(1)
+        if let stack = library.currentStack {
+            StackRow(library: library, frames: stack)
+        }
         RatingPicker(rating: library.rating(for: file.url),
                      rate: { library.rate($0) },
                      reject: { library.toggleReject() })
@@ -206,39 +219,42 @@ private struct FilterControls: View {
             SidebarRow(label: "Folder") { FolderList(library: library) }
         }
         SidebarRow(label: "Rating") { ratingPicker }
+        Toggle("Unviewed only (\(library.unviewedCount))",
+               isOn: Binding(get: { library.unviewedOnly }, set: { _ in library.toggleUnviewed() }))
+            .toggleStyle(.checkbox)
+            .font(.system(size: 12))
+            .help("Only files no earlier session showed large. Files you view now stay. (U)")
         SidebarRow(label: "Order") { orderControls }
     }
 
+    /// Each kind with its count underneath, so four kinds still fit the panel.
     private var modePicker: some View {
         // `switchViewMode(_:toggle: false)` is the mode-button semantics: a direct switch.
-        Picker("Files", selection: Binding(get: { library.viewMode },
-                                           set: { library.switchViewMode($0, toggle: false) })) {
-            ForEach(visibleModes, id: \.self) { mode in
-                Text(library.modeButtonLabel(mode)).tag(mode)
+        Segments(values: visibleModes, selected: library.viewMode,
+                 select: { library.switchViewMode($0, toggle: false) }, height: 30) { mode in
+            VStack(spacing: 0) {
+                Text(mode.buttonLabel)
+                Text(library.modeFileCount(mode).formatted())
+                    .font(.system(size: 9).monospacedDigit())
+                    .opacity(0.75)
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
     }
+
+    private static let ratingValues = [0, RatingFilter.unratedValue, 1, 2, 3, 4, 5, -1]
 
     private var ratingPicker: some View {
         // `setRatingFilter` is async (it sweeps every rating off disk first).
-        Picker("Rating filter", selection: Binding(
-            get: { library.ratingFilter.value },
-            set: { value in Task { await library.setRatingFilter(value) } })) {
-            Text("All").tag(0)
-            Text("0").tag(RatingFilter.unratedValue)
-            Text("1+").tag(1)
-            Text("2+").tag(2)
-            Text("3+").tag(3)
-            Text("4+").tag(4)
-            Text("5").tag(5)
-            Image(systemName: "xmark").tag(-1)
+        Segments(values: Self.ratingValues, selected: library.ratingFilter.value,
+                 select: { value in Task { await library.setRatingFilter(value) } }) { value in
+            switch value {
+            case 0: Text("All")
+            case RatingFilter.unratedValue: Text("0")
+            case -1: Image(systemName: "xmark")
+            case 5: Text("5")
+            default: Text("\(value)+")
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .controlSize(.small)
     }
 
     @ViewBuilder
@@ -302,5 +318,130 @@ private struct FolderList: View {
         }
         .buttonStyle(.plain)
         .opacity(excluded ? 0.5 : 1)
+    }
+}
+
+// MARK: - Display
+
+/// Single image or grid, at the top of the panel. `G` and `Return` still do the same.
+private struct DisplaySwitch: View {
+    let library: Library
+
+    var body: some View {
+        Segments(values: [false, true], selected: library.displayMode == .grid,
+                 select: { library.showGrid($0) }, height: 24) { grid in
+            Label(grid ? "Grid" : "Single", systemImage: grid ? "square.grid.2x2" : "photo")
+        }
+        .help("Single image or grid (G)")
+    }
+}
+
+// MARK: - Days
+
+/// One row per day of the timeline; a click jumps to its first frame. The current day is
+/// highlighted. `⌥↑` / `⌥↓` walk the same list.
+private struct DayList: View {
+    let library: Library
+
+    var body: some View {
+        let current = library.currentDay
+        VStack(spacing: 1) {
+            ForEach(Array(library.dayList.enumerated()), id: \.offset) { day, entry in
+                Button { library.jumpToDay(day) } label: {
+                    HStack {
+                        Text(Self.format(entry.date))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text("\(entry.count)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(day == current ? Color.accentColor.opacity(0.35) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// `Wed, 4 Nov`, with the year when it is not this year.
+    static func format(_ date: Date, now: Date = Date()) -> String {
+        var style = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
+        if !Calendar.current.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
+        return date.formatted(style)
+    }
+}
+
+// MARK: - Stack
+
+/// `⧉ Stack of 3 · 0, −0.7, +0.7 EV` and the button that opens or folds it (`K`).
+private struct StackRow: View {
+    let library: Library
+    let frames: [MediaFile]
+
+    private var evText: String {
+        frames.map { frame -> String in
+            let bias = frame.exposure?.bias ?? 0
+            let rounded = (bias * 10).rounded() / 10
+            if rounded == 0 { return "0" }
+            return (rounded > 0 ? "+" : "\u{2212}") + String(format: "%g", abs(rounded))
+        }.joined(separator: ", ") + " EV"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.stack.fill")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Stack of \(frames.count)")
+                    .font(.system(size: 12, weight: .medium))
+                Text(evText)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 6)
+            Button(library.isCurrentStackExpanded ? "Collapse" : "Expand") { library.toggleStack() }
+                .controlSize(.small)
+                .help("Show every frame of the stack, or fold it into one (K)")
+        }
+    }
+}
+
+// MARK: - Segments
+
+/// A segmented control that always splits the width it is given. AppKit's segmented control
+/// sometimes keeps its natural width instead of shrinking, which pushed the whole sidebar
+/// column wider than the panel; these buttons share the width evenly and never ask for more.
+private struct Segments<Value: Hashable, Content: View>: View {
+    let values: [Value]
+    let selected: Value
+    let select: (Value) -> Void
+    var height: CGFloat = 20
+    @ViewBuilder let label: (Value) -> Content
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(values, id: \.self) { value in
+                let isSelected = value == selected
+                Button { select(value) } label: {
+                    label(value)
+                        .font(.system(size: 11, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+                        .foregroundStyle(isSelected ? Color.white : Color.primary.opacity(0.85))
+                        .frame(maxWidth: .infinity, minHeight: height)
+                        .background(isSelected ? Color.accentColor : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
     }
 }

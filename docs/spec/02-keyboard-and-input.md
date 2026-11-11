@@ -77,7 +77,14 @@ first is the default) while keeping the current file selected. `S` with
 `Shift` toggles Group by Scene, and in the single view `↓` / `↑` jump to the
 next / previous scene while scenes are grouped (spec 01 §8 addendum). `V`
 starts the duel, where `←` / `→` / `↓` choose and `⌘Z` undoes; `Esc` leaves it
-before closing compare or the folder.
+before closing compare or the folder. `U` toggles Unviewed Only (spec 01 §8
+addendum). Mac app change: `Esc` goes up one level per press, after closing an
+overlay or the multi-selection: duel or compare → single view → grid → close
+the folder (the toolbar's Back button follows the same ladder; File → Close
+Folder closes directly). The single view used to close the folder and the grid
+used to return to the single view. `⌥↓` / `⌥↑` and Page Down / Page Up jump between days in the grid
+and the single view, `K` expands or collapses the current stack (spec 01 §8
+addendum).
 
 ### Bindings with no modifier check
 

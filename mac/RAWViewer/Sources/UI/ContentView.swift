@@ -40,7 +40,8 @@ struct ContentView: View {
                                           isSelected: { library.isSelected(index: $0) },
                                           selectionRevision: library.selectionRevision,
                                           selectedURLs: { library.selectedFiles.map(\.url) },
-                                          thumb: { scheduler.thumb80(for: $0) }),
+                                          thumb: { scheduler.thumb80(for: $0) },
+                                          stackSize: { library.collapsedStackSize($0) }),
                     onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
                     onVisibleRange: { library.filmstripVisibleRange($0) })
                 .frame(height: Theme.filmstripHeight)
@@ -152,14 +153,17 @@ struct ContentView: View {
         let scheduler = library.scheduler
         return GridView(
             model: GridModel(files: library.files, index: library.index, ratings: library.ratings,
-                             scenes: library.scenes,
+                             scenes: library.scenes, days: library.days,
+                             groups: library.state.gridGroups,
+                             dayJumpRevision: library.dayJumpRevision,
                              thumbRevision: scheduler.thumbs80.count &+ scheduler.thumbs200.count,
                              ratingsRevision: library.ratingsRevision,
                              isSelected: { library.isSelected(index: $0) },
                              selectionRevision: library.selectionRevision,
                              selectedURLs: { library.selectedFiles.map(\.url) },
                              thumb200: { scheduler.thumb200(for: $0) },
-                             thumb80: { scheduler.thumb80(for: $0) }),
+                             thumb80: { scheduler.thumb80(for: $0) },
+                             stackSize: { library.collapsedStackSize($0) }),
             onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
             onActivate: { library.select(index: $0); library.toggleGrid() },
             onLayout: { columns in
