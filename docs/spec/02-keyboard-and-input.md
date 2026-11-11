@@ -77,7 +77,9 @@ first is the default) while keeping the current file selected. `S` with
 `Shift` toggles Group by Scene, and in the single view `↓` / `↑` jump to the
 next / previous scene while scenes are grouped (spec 01 §8 addendum). `V`
 starts the duel, where `←` / `→` / `↓` choose and `⌘Z` undoes; `Esc` leaves it
-before closing compare or the folder.
+before closing compare or the folder. `U` toggles Unviewed Only (spec 01 §8
+addendum). `⌥↓` / `⌥↑` and Page Down / Page Up jump between days in the grid
+and the single view (spec 01 §8 addendum).
 
 ### Bindings with no modifier check
 

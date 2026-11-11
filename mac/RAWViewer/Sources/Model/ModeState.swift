@@ -34,8 +34,23 @@ public struct ModeState: Sendable {
     /// Mac app addition: cut the timeline into scenes (`Scenes`). Only date orders have
     /// scenes; Best Faces mixes moments, so `scenes` stays `nil` there.
     public var groupsScenes = false
+    /// Mac app addition: hide every file a past session already showed large. Files viewed in
+    /// this session stay, since `applyFilters` gets the viewed set as it was at folder open.
+    public var unviewedOnly = false
     /// The scenes of `files` while grouping applies, otherwise `nil`. Set by `applyFilters`.
     public private(set) var scenes: Scenes?
+    /// The days of `files` in the date orders, otherwise `nil`. Set by `applyFilters`.
+    public private(set) var days: Scenes?
+
+    /// The grid's sections: days, cut further into scenes while those are grouped.
+    public var gridGroups: Scenes {
+        switch (days, scenes) {
+        case let (days?, scenes?): return Scenes(merging: days, scenes)
+        case let (days?, nil): return days
+        case let (nil, scenes?): return scenes
+        case (nil, nil): return Scenes(total: files.count)
+        }
+    }
 
     /// Multi-select. Mac app addition — no Python-app equivalent. `index` stays the single
     /// current file; `selectedURLs` is the (possibly larger) set drawn with the amber border.
@@ -63,11 +78,14 @@ public struct ModeState: Sendable {
 
     /// Spec 01 §13: rating filter, then subfolder filter, then `sortOrder`. The previously
     /// selected file keeps the selection if it survives, otherwise the selection resets to 0.
-    public mutating func applyFilters(ratings: [URL: Int], faceScores: [URL: Float] = [:]) {
+    /// `viewedBefore` holds `ViewedStore.key`s and only matters while `unviewedOnly` is on.
+    public mutating func applyFilters(ratings: [URL: Int], faceScores: [URL: Float] = [:],
+                                      viewedBefore: Set<String> = []) {
         let previous = currentFile
         files = allFiles.filter { file in
             let rating = ratings[file.url] ?? 0
             guard ratingFilter.matches(rating: rating) else { return false }
+            if unviewedOnly, viewedBefore.contains(ViewedStore.key(file.url)) { return false }
             if let folderFilter { return file.subfolder == folderFilter }
             return !excludedFolders.contains(file.subfolder)
         }
@@ -86,6 +104,7 @@ public struct ModeState: Sendable {
             }.map(\.element)
         }
         scenes = groupsScenes && sortOrder != .bestFaces ? Scenes(files: files) : nil
+        days = sortOrder != .bestFaces && !files.isEmpty ? Scenes(days: files) : nil
         if let previous, let kept = files.firstIndex(of: previous) {
             index = kept
         } else {

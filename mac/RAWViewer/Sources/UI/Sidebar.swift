@@ -13,14 +13,21 @@ struct Sidebar: View {
     /// Without a toolbar row it falls back into the list.
     private var titleInToolbarRow: Bool { toolbarHeight >= 20 }
 
+    private static let contentPadding: CGFloat = 14
     private static let filterTitle = "Filter"
     private static let filterSymbol = "line.3.horizontal.decrease"
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                DisplaySwitch(library: library)
                 SidebarSection(title: titleInToolbarRow ? nil : Self.filterTitle, symbol: Self.filterSymbol) {
                     FilterControls(library: library)
+                }
+                if library.dayList.count > 1 {
+                    SidebarSection(title: "Days", symbol: "calendar") {
+                        DayList(library: library)
+                    }
                 }
                 if let file = library.currentFile {
                     SidebarSection(title: "Photo", symbol: "photo") {
@@ -33,7 +40,11 @@ struct Sidebar: View {
                     }
                 }
             }
-            .padding(.horizontal, 14).padding(.bottom, 14).padding(.top, 4)
+            // A fixed column: a scroll view sizes its content by the content's ideal width,
+            // so one wide control (a segmented picker cannot shrink) would widen every section
+            // past the panel's edges.
+            .frame(width: Theme.sidebarWidth - 2 * Self.contentPadding)
+            .padding(.horizontal, Self.contentPadding).padding(.bottom, 14).padding(.top, 4)
         }
         // Keys go through the app's dispatcher, so no control here should show a focus ring.
         .focusEffectDisabled()
@@ -206,15 +217,31 @@ private struct FilterControls: View {
             SidebarRow(label: "Folder") { FolderList(library: library) }
         }
         SidebarRow(label: "Rating") { ratingPicker }
+        Toggle("Unviewed only (\(library.unviewedCount))",
+               isOn: Binding(get: { library.unviewedOnly }, set: { _ in library.toggleUnviewed() }))
+            .toggleStyle(.checkbox)
+            .font(.system(size: 12))
+            .help("Only files no earlier session showed large. Files you view now stay. (U)")
         SidebarRow(label: "Order") { orderControls }
     }
 
+    /// With counts while they fit the panel. A segmented control never shrinks, so a folder
+    /// with all four kinds (`ALL (2682) | RAW (2302) | …`) would push the whole column wider;
+    /// then the bare labels show and the counts move to the tooltip.
     private var modePicker: some View {
+        ViewThatFits(in: .horizontal) {
+            modeSegments(label: library.modeButtonLabel)
+            modeSegments(label: \.buttonLabel)
+                .help(visibleModes.map { library.modeButtonLabel($0) }.joined(separator: " · "))
+        }
+    }
+
+    private func modeSegments(label: @escaping (ViewMode) -> String) -> some View {
         // `switchViewMode(_:toggle: false)` is the mode-button semantics: a direct switch.
         Picker("Files", selection: Binding(get: { library.viewMode },
                                            set: { library.switchViewMode($0, toggle: false) })) {
             ForEach(visibleModes, id: \.self) { mode in
-                Text(library.modeButtonLabel(mode)).tag(mode)
+                Text(label(mode)).tag(mode)
             }
         }
         .pickerStyle(.segmented)
@@ -302,5 +329,62 @@ private struct FolderList: View {
         }
         .buttonStyle(.plain)
         .opacity(excluded ? 0.5 : 1)
+    }
+}
+
+// MARK: - Display
+
+/// Single image or grid, at the top of the panel. `G` and `Return` still do the same.
+private struct DisplaySwitch: View {
+    let library: Library
+
+    var body: some View {
+        Picker("Display", selection: Binding(get: { library.displayMode == .grid },
+                                             set: { library.showGrid($0) })) {
+            Label("Single", systemImage: "photo").tag(false)
+            Label("Grid", systemImage: "square.grid.2x2").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .help("Single image or grid (G)")
+    }
+}
+
+// MARK: - Days
+
+/// One row per day of the timeline; a click jumps to its first frame. The current day is
+/// highlighted. `⌥↑` / `⌥↓` walk the same list.
+private struct DayList: View {
+    let library: Library
+
+    var body: some View {
+        let current = library.currentDay
+        VStack(spacing: 1) {
+            ForEach(Array(library.dayList.enumerated()), id: \.offset) { day, entry in
+                Button { library.jumpToDay(day) } label: {
+                    HStack {
+                        Text(Self.format(entry.date))
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text("\(entry.count)")
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(day == current ? Color.accentColor.opacity(0.35) : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// `Wed, 4 Nov`, with the year when it is not this year.
+    static func format(_ date: Date, now: Date = Date()) -> String {
+        var style = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
+        if !Calendar.current.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
+        return date.formatted(style)
     }
 }

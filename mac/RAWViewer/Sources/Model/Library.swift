@@ -56,6 +56,8 @@ public final class Library {
     public var showFaces: Bool { didSet { preferences.showFaces = showFaces } }
     /// `⇧S`: cut every timeline into scenes. Mac app addition, no Python-app equivalent.
     public private(set) var groupScenes: Bool { didSet { preferences.groupScenes = groupScenes } }
+    /// `U`: only the files no past session showed large. Mac app addition, not persisted.
+    public private(set) var unviewedOnly = false
 
     public private(set) var isScanning = false
     public private(set) var scanProgressText: String?
@@ -77,6 +79,7 @@ public final class Library {
     private let recents: RecentFolders
     private let preferences: Preferences
     private let summaryStore: FolderSummaryStore
+    private let viewedStore: ViewedStore
 
     private var scanTask: Task<Void, Never>?
     /// Bumped on every `openFolder` / `closeFolder`; a scan task only mutates state while its
@@ -90,6 +93,20 @@ public final class Library {
     /// Read from `body` on the empty state, so it must not participate in observation.
     @ObservationIgnored private var summaryCache: [String: FolderSummary]?
     @ObservationIgnored private var summarySaveTask: Task<Void, Never>?
+
+    // MARK: - Viewed files (mac app addition)
+
+    /// The folder `viewedBefore` and `viewedNow` belong to. Not `folder`, which already points
+    /// at the next folder while it scans.
+    @ObservationIgnored private var viewedFolder: URL?
+    /// `ViewedStore.key`s shown large by past sessions, frozen at folder open. The `U` filter
+    /// hides these, so a file viewed in this session stays in the filtered list.
+    @ObservationIgnored private var viewedBefore: Set<String> = []
+    /// Shown large in this session; written back together with `viewedBefore`.
+    @ObservationIgnored private var viewedNow: Set<String> = []
+    @ObservationIgnored private var viewedSaveTask: Task<Void, Never>?
+    /// What is on disk for `viewedFolder`, so an unchanged position is not written again.
+    @ObservationIgnored private var savedViewedEntry: ViewedStore.Entry?
 
     // MARK: - Shoot timer (spec 05 §11)
 
@@ -126,10 +143,12 @@ public final class Library {
                 recents: RecentFolders = .shared,
                 scheduler: PreloadScheduler? = nil,
                 summaryStore: FolderSummaryStore = .shared,
+                viewedStore: ViewedStore = .shared,
                 faceIndex: FaceIndex? = nil) {
         self.preferences = preferences
         self.recents = recents
         self.summaryStore = summaryStore
+        self.viewedStore = viewedStore
         self.scheduler = scheduler ?? PreloadScheduler()
         self.faceIndex = faceIndex ?? FaceIndex()
         self.showSidebar = preferences.showSidebar
@@ -167,6 +186,8 @@ public final class Library {
     public var excludedFolders: Set<String> { state.excludedFolders }
     /// The current timeline's scenes, or `nil` while grouping is off or does not apply.
     public var scenes: Scenes? { state.scenes }
+    /// The current timeline's days, or `nil` under Best Faces.
+    public var days: Scenes? { state.days }
     public var isEmpty: Bool { files.isEmpty }
     /// True while a folder with at least one file in any mode is open, even if the active filter hides everything.
     public var hasLoadedFolder: Bool { modeStates.values.contains { !$0.allFiles.isEmpty } }
@@ -244,6 +265,19 @@ public final class Library {
         ratingsFullyLoaded = false
         pinnedFile = nil
         focusedPane = .right
+        // Where to start: where the last visit ended, or, when the same folder is rescanned
+        // after a move, the file on screen now. A rescan also keeps this session's views apart.
+        var resume: (key: String, mode: ViewMode)?
+        if viewedFolder == url {
+            resume = currentFile.map { (ViewedStore.key($0.url), viewMode) }
+        } else {
+            let entry = viewedStore.load(folder: url)
+            viewedFolder = url
+            viewedBefore = entry.viewed
+            viewedNow = []
+            savedViewedEntry = entry
+            resume = entry.last.map { ($0, entry.mode ?? .raw) }
+        }
 
         var states: [ViewMode: ModeState] = [:]
         for mode in ViewMode.allCases {
@@ -251,7 +285,8 @@ public final class Library {
             modeState.allFiles = result.files(for: mode)
             modeState.sortOrder = sortOrder
             modeState.groupsScenes = groupScenes
-            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+            modeState.unviewedOnly = unviewedOnly
+            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
             states[mode] = modeState
         }
         modeStates = states
@@ -264,6 +299,7 @@ public final class Library {
                 viewMode = result.video.count > result.jpeg.count ? .video : .jpeg
             }
         }
+        if let resume { restorePosition(key: resume.key, mode: resume.mode) }
 
         startShootTimer(for: url)
         scheduler.reset(totalFileCount: files.count)
@@ -299,6 +335,10 @@ public final class Library {
         ratingsRevision &+= 1
         selectionRevision &+= 1
         ratingsFullyLoaded = false
+        viewedFolder = nil
+        viewedBefore = []
+        viewedNow = []
+        savedViewedEntry = nil
         folder = nil
         viewMode = .raw
         displayMode = .single
@@ -341,6 +381,36 @@ public final class Library {
         select(index: scenes.starts[target])
     }
 
+    /// `⌥↓` / `⌥↑`, Page Down / Page Up: the first file of the next day, or of the previous
+    /// one; back from the middle of a day goes to that day's start first, as with scenes.
+    public func navigateDay(by delta: Int) {
+        guard let days, !files.isEmpty else { return }
+        let current = days.scene(of: state.index)
+        let target = delta < 0 && state.index > days.starts[current] ? current : current + delta
+        guard target >= 0, target < days.count else { return }
+        jumpToDay(target)
+    }
+
+    /// A click in the sidebar's day list, or a day key. The grid scrolls that day to the top.
+    public func jumpToDay(_ day: Int) {
+        guard let days, day >= 0, day < days.count else { return }
+        endDuel()
+        select(index: days.starts[day])
+        dayJumpRevision &+= 1
+    }
+
+    /// Bumped on every day jump, so the grid puts the day's header at the top instead of
+    /// just scrolling the cell into view.
+    public private(set) var dayJumpRevision = 0
+
+    /// One row per day for the sidebar: its first file's date and how many files it holds.
+    public var dayList: [(date: Date, count: Int)] {
+        guard let days else { return [] }
+        return (0..<days.count).map { (files[days.starts[$0]].captureDate, days.range(of: $0).count) }
+    }
+
+    public var currentDay: Int? { days.map { $0.scene(of: state.index) } }
+
     /// Spec 01 §17: loads every rating from disk, then jumps to the last file rated above 0.
     public func jumpToLastRated() async {
         await loadAllRatings()
@@ -367,7 +437,7 @@ public final class Library {
             target = min(files.count - 1, max(0, target + dx))
         }
         if dy != 0 {
-            target = GridGeometry(scenes: scenes ?? Scenes(total: files.count), columns: gridColumns)
+            target = GridGeometry(scenes: state.gridGroups, columns: gridColumns)
                 .moveVertical(index: target, deltaRows: dy)
         }
         guard target != state.index else { return }
@@ -426,8 +496,10 @@ public final class Library {
         return true
     }
 
+    /// Runs whenever the current file or the display changes, so it also notes what is shown.
     private func refreshPreloading() {
         guard !files.isEmpty else { return }
+        noteCurrentFile()
         scheduler.setCurrent(currentFile)
         scheduler.preloadNearby(index: state.index, in: files)
         let first = max(0, state.index - 10)
@@ -533,14 +605,14 @@ public final class Library {
         if value != 0 { await loadAllRatings() }
         scheduler.stopBackgroundSweep()
         state.ratingFilter = RatingFilter(value)
-        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
         afterFilterChange()
     }
 
     public func setFolderFilter(_ name: String?) {
         scheduler.stopBackgroundSweep()
         state.folderFilter = name
-        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
         afterFilterChange()
     }
 
@@ -553,7 +625,7 @@ public final class Library {
         for mode in ViewMode.allCases {
             var modeState = modeStates[mode] ?? ModeState()
             modeState.sortOrder = order
-            modeState.applyFilters(ratings: ratings, faceScores: scores)
+            modeState.applyFilters(ratings: ratings, faceScores: scores, viewedBefore: viewedBefore)
             modeStates[mode] = modeState
         }
         scheduler.stopBackgroundSweep()
@@ -570,7 +642,7 @@ public final class Library {
         for mode in ViewMode.allCases {
             var modeState = modeStates[mode] ?? ModeState()
             modeState.groupsScenes = groupScenes
-            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
             modeStates[mode] = modeState
         }
         scheduler.stopBackgroundSweep()
@@ -580,12 +652,30 @@ public final class Library {
         }
     }
 
+    /// `U`: hide every file a past session already showed large.
+    public func toggleUnviewed() {
+        unviewedOnly.toggle()
+        for mode in ViewMode.allCases {
+            var modeState = modeStates[mode] ?? ModeState()
+            modeState.unviewedOnly = unviewedOnly
+            modeState.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
+            modeStates[mode] = modeState
+        }
+        scheduler.stopBackgroundSweep()
+        afterFilterChange()
+    }
+
+    /// Files of the current mode no past session showed large.
+    public var unviewedCount: Int {
+        allFiles.reduce(0) { $0 + (viewedBefore.contains(ViewedStore.key($1.url)) ? 0 : 1) }
+    }
+
     /// A finished face sweep brings scores for files that had none, so Best Faces sorts again.
     /// Only when the order actually changes, since `afterFilterChange` drops the thumbnails.
     private func resortByFaces() {
         guard sortOrder == .bestFaces else { return }
         var resorted = state
-        resorted.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+        resorted.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
         guard resorted.files != files else { return }
         scheduler.stopBackgroundSweep()
         state = resorted
@@ -597,7 +687,7 @@ public final class Library {
         var excluded = state.excludedFolders
         if excluded.contains(folderName) { excluded.remove(folderName) } else { excluded.insert(folderName) }
         state.excludedFolders = excluded
-        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores)
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
         afterFilterChange()
     }
 
@@ -651,6 +741,17 @@ public final class Library {
             exitCompare()
             endDuel()
             displayMode = .grid
+        }
+    }
+
+    /// The sidebar's Single / Grid switch. Single from the duel ends the duel.
+    public func showGrid(_ grid: Bool) {
+        if grid {
+            if displayMode != .grid { toggleGrid() }
+        } else if displayMode == .grid {
+            toggleGrid()
+        } else if displayMode == .duel {
+            endDuel()
         }
     }
 
@@ -1000,6 +1101,48 @@ public final class Library {
     public func persistShootStats() {
         writeShootStats()
         saveFolderSummary()
+        saveViewed()
+    }
+
+    // MARK: - Viewed files (mac app addition)
+
+    /// Marks the current file viewed (single view, duel and compare show it large; the grid
+    /// only a thumbnail) and saves it as the place to come back to, 2 s after the last move.
+    private func noteCurrentFile() {
+        guard viewedFolder != nil, let file = currentFile else { return }
+        if displayMode != .grid { viewedNow.insert(ViewedStore.key(file.url)) }
+        viewedSaveTask?.cancel()
+        viewedSaveTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            self?.saveViewed()
+        }
+    }
+
+    /// Writes the viewed files and the current position of `viewedFolder`, when they changed.
+    private func saveViewed() {
+        viewedSaveTask?.cancel()
+        viewedSaveTask = nil
+        guard let viewedFolder else { return }
+        let entry = ViewedStore.Entry(viewed: viewedBefore.union(viewedNow),
+                                      last: currentFile.map { ViewedStore.key($0.url) },
+                                      mode: viewMode)
+        guard entry != savedViewedEntry else { return }
+        viewedStore.save(entry, folder: viewedFolder)
+        savedViewedEntry = entry
+    }
+
+    /// Opens `mode` on the file `key` names, when that mode still holds it; otherwise the
+    /// folder starts at the beginning as before.
+    private func restorePosition(key: String, mode: ViewMode) {
+        for candidate in [mode, viewMode] {
+            guard let state = modeStates[candidate],
+                  let index = state.files.firstIndex(where: { ViewedStore.key($0.url) == key }) else { continue }
+            viewMode = candidate
+            self.state.index = index
+            self.state.selectOnly(index: index)
+            return
+        }
     }
 
     // MARK: - Folder summary (empty-state dashboard)
@@ -1095,6 +1238,7 @@ public final class Library {
         if let scenes { text += "  ·  Scene \(scenes.scene(of: state.index) + 1)/\(scenes.count)" }
         if let duel { text += "  ·  Duel \(duel.round)/\(duel.rounds)" }
         if let badge = state.ratingFilter.badgeText { text += "  (\(badge))" }
+        if state.unviewedOnly { text += "  (unviewed)" }
         if let folderFilter = state.folderFilter {
             text += "  [\(folderFilter)]"
         } else if !state.excludedFolders.isEmpty {
@@ -1122,8 +1266,9 @@ public final class Library {
 
     /// `"≥3★ · 42/137"` for the toolbar's filter badge, or `nil` when no rating filter is active.
     public var filterBadgeText: String? {
-        guard let badge = state.ratingFilter.badgeText else { return nil }
-        return "\(badge) · \(files.count)/\(allFiles.count)"
+        let parts = [state.ratingFilter.badgeText, state.unviewedOnly ? "Unviewed" : nil].compactMap { $0 }
+        guard !parts.isEmpty else { return nil }
+        return "\(parts.joined(separator: " · ")) · \(files.count)/\(allFiles.count)"
     }
 
     /// `"RAW (137)"`, or the bare label when that mode has no files (the button is then hidden).

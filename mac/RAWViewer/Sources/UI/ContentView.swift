@@ -152,7 +152,9 @@ struct ContentView: View {
         let scheduler = library.scheduler
         return GridView(
             model: GridModel(files: library.files, index: library.index, ratings: library.ratings,
-                             scenes: library.scenes,
+                             scenes: library.scenes, days: library.days,
+                             groups: library.state.gridGroups,
+                             dayJumpRevision: library.dayJumpRevision,
                              thumbRevision: scheduler.thumbs80.count &+ scheduler.thumbs200.count,
                              ratingsRevision: library.ratingsRevision,
                              isSelected: { library.isSelected(index: $0) },

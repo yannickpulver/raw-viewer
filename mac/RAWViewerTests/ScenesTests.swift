@@ -26,6 +26,23 @@ final class ScenesTests: XCTestCase {
         XCTAssertEqual(scenes.range(of: 2), 5..<6)
     }
 
+    func testDaysCutAtMidnightOnly() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        // 22:13 and 23:03 on the 14th, 00:10 and 00:11 on the 15th, 02:00 on the 16th (UTC).
+        let days = Scenes(days: files(at: [0, 3000, 7000, 7100, 100_000]), calendar: calendar)
+        XCTAssertEqual(days.starts, [0, 2, 4])
+        XCTAssertEqual(Scenes(days: files(at: [100_000, 7100, 7000, 3000, 0]), calendar: calendar).starts, [0, 1, 3])
+        XCTAssertTrue(days.starts(at: 2))
+        XCTAssertFalse(days.starts(at: 3))
+    }
+
+    func testMergingKeepsEveryCut() {
+        let merged = Scenes(merging: SceneFixtures.scenes([2, 3, 1]), SceneFixtures.scenes([3, 3]))
+        XCTAssertEqual(merged.starts, [0, 2, 3, 5])
+        XCTAssertEqual(merged.total, 6)
+    }
+
     func testEmptyAndUngrouped() {
         XCTAssertEqual(Scenes(files: []).count, 0)
         XCTAssertEqual(Scenes(total: 0).count, 0)

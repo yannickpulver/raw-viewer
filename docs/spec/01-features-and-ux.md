@@ -558,6 +558,39 @@ respects the rating filter, so `⌘1` then `V` is a second pass over the picks.
 - rating keys and `X` do nothing; compare (`C`) is refused; a filter, sort,
   mode or grid change ends the duel; `Esc` returns to the single view
 
+Mac app addition: **days in the grid**. In the date orders the grid is cut into
+days (`ModeState.days`, calendar day of the capture date): every day starts on a
+new row under a 40 px band `Wednesday, 4 November  ·  312 frames  ·  12 picked`
+(year shown when not this year). With Group by Scene on, scenes cut the days
+further (`ModeState.gridGroups`); a scene band then reads `15:27  ·  7 frames`,
+stacked under the day band when a day opens with a scene. Best Faces keeps one
+flat grid. `⌥↓` / `⌥↑` (also Page Down / Page Up, View menu) jump to the next /
+previous day start in the grid and the single view (back from mid-day goes to
+the day's start first); in the grid a day jump scrolls the day's band to the
+top. The grid's vertical scroller is always visible (legacy style).
+
+The sidebar opens with a **Single / Grid** switch (same as `G`) and lists the
+**Days** (`Wed, 4 Nov` and the frame count, current day highlighted) whenever
+the timeline spans more than one day; a click jumps to that day.
+
+Mac app addition: **Unviewed Only** (`U`, View menu, sidebar checkbox
+`Unviewed only (N)`, not persisted). A file counts as viewed once it is the
+current file in the single view, the duel or compare; grid cells do not count.
+The filter hides the files viewed in *earlier* sessions of this folder: the
+viewed set is read once at folder open, so files viewed now stay in the list
+until the folder is opened again. It combines with the rating and subfolder
+filters; the counter reads `7/42  (unviewed)`.
+
+Mac app addition: **resume**. Opening a folder again starts on the file and in
+the mode (RAW / JPEG / Video / All) where the last visit ended; when that file
+is gone it starts at the beginning as before (spec 01 §10). A rescan of the open
+folder (after a move) keeps the file on screen.
+
+Views and the position are kept per folder in
+`~/Library/Application Support/RAW Viewer/viewed/<sha256 of folder path>.json`
+as `{"viewed": [...], "last": "...", "mode": "raw"}` (paths relative to the
+folder), written 2 s after the last move and on folder close and quit.
+
 ---
 
 ## 9. Compare mode

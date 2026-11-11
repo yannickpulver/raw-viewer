@@ -146,6 +146,23 @@ final class GridLayoutTests: XCTestCase {
         XCTAssertEqual(plain.index(atX: 7 * 84 + 3), 7)
         XCTAssertEqual(plain.width, 840)
     }
+
+    /// Days and scenes give each group its own band: a day opening with a scene stacks both.
+    func testHeadersPerGroup() {
+        let headers = [66, 26, 40]
+        let geometry = GridGeometry(scenes: SceneFixtures.scenes([2, 1, 3]), headers: headers, columns: 4)
+        let stride = geometry.cell + geometry.spacing
+        let spacing = geometry.spacing
+        XCTAssertEqual(geometry.headerTop(scene: 0), spacing)
+        XCTAssertEqual(geometry.cellOrigin(index: 0).y, spacing + 66)
+        XCTAssertEqual(geometry.headerTop(scene: 1), spacing + 66 + stride)
+        XCTAssertEqual(geometry.cellOrigin(index: 2).y, spacing + 66 + stride + 26)
+        XCTAssertEqual(geometry.headerTop(scene: 2), spacing + 66 + 26 + 2 * stride)
+        XCTAssertEqual(geometry.contentHeight, spacing + 66 + 26 + 40 + 3 * stride)
+        // The day band holds no cell.
+        XCTAssertEqual(geometry.index(atX: 10, y: Double(geometry.headerTop(scene: 2) + 10)), -1)
+        XCTAssertEqual(geometry.index(atX: 10, y: Double(geometry.cellOrigin(index: 3).y + 10)), 3)
+    }
 }
 
 /// Files whose capture times make scenes of the given sizes: frames 1 s apart, scenes 2 min apart.

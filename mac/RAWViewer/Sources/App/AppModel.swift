@@ -161,6 +161,8 @@ public final class AppModel {
         static let escape: UInt16 = 53
         static let space: UInt16 = 49
         static let backspace: UInt16 = 51
+        static let pageUp: UInt16 = 116
+        static let pageDown: UInt16 = 121
         /// Top-row `0`-`5` on the physical keyboard, so non-US layouts rate correctly.
         static let digits: [UInt16: Int] = [29: 0, 18: 1, 19: 2, 20: 3, 21: 4, 23: 5]
     }
@@ -200,6 +202,16 @@ public final class AppModel {
             }
             if command, characters == "z" { library.undoDuel(); return true }
             if bare, characters == "x" || digit(keyCode: key, characters: characters) != nil { return true }
+        }
+
+        // Mac app addition: days, in the grid and the single view alike.
+        if modifiers == .option, key == KeyCode.down || key == KeyCode.up {
+            library.navigateDay(by: key == KeyCode.down ? 1 : -1)
+            return true
+        }
+        if key == KeyCode.pageDown || key == KeyCode.pageUp {
+            library.navigateDay(by: key == KeyCode.pageDown ? 1 : -1)
+            return true
         }
 
         // Grid mode gets first refusal.
@@ -260,6 +272,7 @@ public final class AppModel {
             case "f": library.toggleFaces(); return true
             // Mac app addition: no Python-app equivalent.
             case "v": library.toggleDuel(); return true
+            case "u": library.toggleUnviewed(); return true
             default: break
             }
         }

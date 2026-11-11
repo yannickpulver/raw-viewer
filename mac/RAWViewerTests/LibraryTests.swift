@@ -9,6 +9,7 @@ final class LibraryTests: XCTestCase {
     private var library: Library!
     private var summaryFile: URL!
     private var summaryStore: FolderSummaryStore!
+    private var viewedStore: ViewedStore!
 
     override func setUp() async throws {
         root = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -22,11 +23,13 @@ final class LibraryTests: XCTestCase {
         summaryFile = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("summaries-\(UUID().uuidString).json")
         summaryStore = FolderSummaryStore(file: summaryFile)
+        viewedStore = ViewedStore(directory: root.appendingPathComponent("viewed", isDirectory: true))
 
         let preferences = Preferences(defaults: defaults)
         library = Library(preferences: preferences,
                           recents: RecentFolders(defaults: defaults),
-                          summaryStore: summaryStore)
+                          summaryStore: summaryStore,
+                          viewedStore: viewedStore)
     }
 
     override func tearDown() async throws {
@@ -74,6 +77,7 @@ final class LibraryTests: XCTestCase {
         library = Library(preferences: Preferences(defaults: defaults),
                           recents: RecentFolders(defaults: defaults),
                           summaryStore: summaryStore,
+                          viewedStore: viewedStore,
                           faceIndex: faceIndex)
         try await seedRawFolder(count: 2)
         XCTAssertNil(faceIndex.faces(for: library.files[0].url))
@@ -567,6 +571,7 @@ final class LibraryTests: XCTestCase {
         library = Library(preferences: Preferences(defaults: defaults),
                           recents: RecentFolders(defaults: defaults),
                           summaryStore: summaryStore,
+                          viewedStore: viewedStore,
                           faceIndex: faceIndex)
         try await seedRawFolder(count: 4)
         let files = library.files
@@ -897,5 +902,168 @@ final class LibraryTests: XCTestCase {
         await library.setRatingFilter(1)
         XCTAssertNil(library.duel)
         XCTAssertEqual(library.displayMode, .single)
+    }
+
+    // MARK: - Unviewed (mac app addition)
+
+    private func makeLibrary() -> Library {
+        Library(preferences: Preferences(defaults: defaults),
+                recents: RecentFolders(defaults: defaults),
+                summaryStore: summaryStore,
+                viewedStore: viewedStore)
+    }
+
+    func testUnviewedHidesFilesViewedInAnEarlierSession() async throws {
+        try await seedRawFolder()
+        library.select(index: 1)
+        library.closeFolder()
+
+        library = makeLibrary()
+        try await openAndWait(root)
+        // Opening shows IMG_0000 again, but that only counts from the next session on.
+        library.toggleUnviewed()
+        XCTAssertTrue(library.unviewedOnly)
+        XCTAssertEqual(library.files.map(\.name), ["IMG_0002.cr3", "IMG_0003.cr3"])
+        XCTAssertEqual(library.unviewedCount, 2)
+        XCTAssertEqual(library.positionText, "1/2  (unviewed)")
+        XCTAssertEqual(library.filterBadgeText, "Unviewed · 2/4")
+
+        library.toggleUnviewed()
+        XCTAssertEqual(library.files.count, 4)
+    }
+
+    func testFilesViewedThisSessionStayInTheUnviewedList() async throws {
+        try await seedRawFolder()
+        library.toggleUnviewed()
+        XCTAssertEqual(library.files.count, 4)
+        library.navigate(by: 1)
+        library.navigate(by: 1)
+        // Re-filtering uses the views from before this session.
+        library.toggleUnviewed()
+        library.toggleUnviewed()
+        XCTAssertEqual(library.files.count, 4)
+
+        library.closeFolder()
+        library = makeLibrary()
+        try await openAndWait(root)
+        library.toggleUnviewed()
+        XCTAssertEqual(library.files.map(\.name), ["IMG_0003.cr3"])
+    }
+
+    func testGridCellsDoNotCountAsViewed() async throws {
+        try await seedRawFolder()
+        library.toggleGrid()
+        library.gridMove(dx: 1, dy: 0)
+        library.click(index: 2, modifiers: [])
+        library.closeFolder()
+
+        library = makeLibrary()
+        try await openAndWait(root)
+        library.toggleUnviewed()
+        // Only the first file, shown large at open, was viewed.
+        XCTAssertEqual(library.files.count, 3)
+    }
+
+    // MARK: - Days
+
+    /// Two days on disk: three frames on the first (the last one five hours later), two on the next.
+    private func seedTwoDayFolder() async throws {
+        let calendar = Calendar.current
+        let first = calendar.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 10))!
+        let second = calendar.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 9))!
+        let dates = [first, first.addingTimeInterval(1), first.addingTimeInterval(5 * 3600),
+                     second, second.addingTimeInterval(1)]
+        for (index, date) in dates.enumerated() {
+            let url = touch(String(format: "IMG_%04d.cr3", index))
+            try FileManager.default.setAttributes([.creationDate: date, .modificationDate: date], ofItemAtPath: url.path)
+        }
+        try await openAndWait(root)
+    }
+
+    func testDaysGroupTheTimelineAndScenesCutThemFurther() async throws {
+        try await seedTwoDayFolder()
+        XCTAssertEqual(library.days?.starts, [0, 3])
+        XCTAssertEqual(library.dayList.map(\.count), [3, 2])
+        XCTAssertEqual(library.state.gridGroups.starts, [0, 3])
+        library.toggleScenes()
+        XCTAssertEqual(library.state.gridGroups.starts, [0, 2, 3])
+    }
+
+    func testNavigateDayJumpsBetweenDayStarts() async throws {
+        try await seedTwoDayFolder()
+        library.navigateDay(by: 1)
+        XCTAssertEqual(library.index, 3)
+        XCTAssertEqual(library.currentDay, 1)
+        XCTAssertEqual(library.dayJumpRevision, 1)
+        library.navigateDay(by: 1)
+        XCTAssertEqual(library.index, 3, "no day after the last")
+        library.select(index: 4)
+        library.navigateDay(by: -1)
+        XCTAssertEqual(library.index, 3, "back from mid-day goes to its start first")
+        library.navigateDay(by: -1)
+        XCTAssertEqual(library.index, 0)
+        library.jumpToDay(1)
+        XCTAssertEqual(library.index, 3)
+    }
+
+    func testShowGridSwitchesTheDisplay() async throws {
+        try await seedTwoDayFolder()
+        library.showGrid(true)
+        XCTAssertEqual(library.displayMode, .grid)
+        library.showGrid(true)
+        XCTAssertEqual(library.displayMode, .grid)
+        library.showGrid(false)
+        XCTAssertEqual(library.displayMode, .single)
+    }
+
+    // MARK: - Resume
+
+    func testReopeningAFolderStartsWhereTheLastVisitEnded() async throws {
+        try await seedRawFolder()
+        library.select(index: 2)
+        library.closeFolder()
+
+        library = makeLibrary()
+        try await openAndWait(root)
+        XCTAssertEqual(library.currentFile?.name, "IMG_0002.cr3")
+        XCTAssertEqual(library.index, 2)
+    }
+
+    func testResumeRestoresTheModeAndFallsBackWhenTheFileIsGone() async throws {
+        touch("IMG_0000.cr3")
+        touch("IMG_0001.jpg")
+        let photo = touch("IMG_0002.jpg")
+        try await openAndWait(root)
+        library.switchViewMode(.jpeg, toggle: true)
+        library.navigate(by: 1)
+        library.closeFolder()
+
+        library = makeLibrary()
+        try await openAndWait(root)
+        XCTAssertEqual(library.viewMode, .jpeg)
+        XCTAssertEqual(library.currentFile?.name, "IMG_0002.jpg")
+        library.closeFolder()
+
+        try FileManager.default.removeItem(at: photo)
+        library = makeLibrary()
+        try await openAndWait(root)
+        XCTAssertEqual(library.viewMode, .raw)
+        XCTAssertEqual(library.index, 0)
+    }
+
+    func testViewedStoreReadsTheFirstBuildsPlainList() throws {
+        let store = ViewedStore(directory: root.appendingPathComponent("legacy-viewed", isDirectory: true))
+        let folder = root.appendingPathComponent("shoot", isDirectory: true)
+        AppPaths.ensureDirectory(store.directory)
+        try JSONEncoder().encode(["a.raf", "sub/b.raf"]).write(to: store.file(for: folder))
+        let entry = store.load(folder: folder)
+        XCTAssertEqual(entry.viewed, [ViewedStore.key(folder.appendingPathComponent("a.raf")),
+                                      ViewedStore.key(folder.appendingPathComponent("sub/b.raf"))])
+        XCTAssertNil(entry.last)
+
+        store.save(ViewedStore.Entry(viewed: entry.viewed, last: ViewedStore.key(folder.appendingPathComponent("a.raf")),
+                                     mode: .jpeg), folder: folder)
+        XCTAssertEqual(store.load(folder: folder).mode, .jpeg)
+        XCTAssertEqual(store.load(folder: folder).last, ViewedStore.key(folder.appendingPathComponent("a.raf")))
     }
 }
