@@ -30,7 +30,11 @@ enum Theme {
     static let thumbStride: CGFloat = 84
     /// Extra space between two scenes in the filmstrip while scenes are grouped.
     static let sceneGap: CGFloat = 16
-    static let faceThumbSize: CGFloat = 64
+    /// The right sidebar (`I`). Wide enough for the eight-segment rating filter.
+    static let sidebarWidth: CGFloat = 300
+    static let sidebarBackground = Color(.sRGB, white: 28.0 / 255.0, opacity: 1)
+    /// Gap between the floating sidebar and the window edges, the toolbar and the filmstrip.
+    static let sidebarInset: CGFloat = 8
 }
 
 // MARK: - Native chrome surfaces

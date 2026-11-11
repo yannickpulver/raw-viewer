@@ -532,11 +532,11 @@ final class LibraryTests: XCTestCase {
     }
 
     func testPreferencesPersistAcrossInstances() async throws {
-        library.toggleInfo()
-        XCTAssertFalse(library.showInfo)
+        library.toggleSidebar()
+        XCTAssertFalse(library.showSidebar)
         let second = Library(preferences: Preferences(defaults: defaults),
                              recents: RecentFolders(defaults: defaults))
-        XCTAssertFalse(second.showInfo)
+        XCTAssertFalse(second.showSidebar)
         XCTAssertTrue(second.filmstripVisible)
     }
 

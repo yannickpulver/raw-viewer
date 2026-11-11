@@ -1,8 +1,8 @@
 import CoreGraphics
 import SwiftUI
 
-/// The faces of the image on screen, cropped out of its preview, right under the info block:
-/// at most four per row, then it wraps. A click zooms the canvas onto that face.
+/// The faces of the image on screen, cropped out of its preview, in the sidebar: four per
+/// row, then it wraps. A click zooms the canvas onto that face.
 struct FacePanel: View {
     let model: AppModel
     let file: MediaFile
@@ -14,31 +14,36 @@ struct FacePanel: View {
         let faces = library.faceIndex.faces(for: file.url)
         let image = library.scheduler.preview(for: file.url)
         let remaining = library.faceIndex.remaining
-        VStack(alignment: .trailing, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             if let faces, !faces.isEmpty {
                 let rows = Self.rows(faces)
-                VStack(alignment: .trailing, spacing: 6) {
-                    ForEach(rows.indices, id: \.self) { row in
-                        HStack(spacing: 6) {
-                            ForEach(rows[row].indices, id: \.self) { column in
+                ForEach(rows.indices, id: \.self) { row in
+                    // Every row has `perRow` slots, so a short last row keeps the cell size.
+                    HStack(spacing: 6) {
+                        ForEach(0..<Self.perRow, id: \.self) { column in
+                            if column < rows[row].count {
                                 let face = rows[row][column]
                                 FaceCell(face: face, crop: image.flatMap { Self.crop($0, to: face.rect) })
                                     .onTapGesture { model.focusFace(face.rect) }
                                     .pointingHandCursor()
+                            } else {
+                                Color.clear.aspectRatio(1, contentMode: .fit)
                             }
                         }
                     }
                 }
+            } else if faces != nil {
+                Text("No faces")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
             if faces == nil || remaining > 0 {
                 Text(status(faces: faces, remaining: remaining))
                     .font(.system(size: 11).monospacedDigit())
-                    .foregroundStyle(Theme.dimText)
-                    .chromeTextShadow()
-                    .allowsHitTesting(false)
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func status(faces: [Face]?, remaining: Int) -> String {
@@ -75,17 +80,17 @@ private struct FaceCell: View {
     let crop: CGImage?
 
     var body: some View {
-        let size = Theme.faceThumbSize
-        ZStack {
-            Theme.stripBackground
-            if let crop {
-                Image(decorative: crop, scale: 1)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fill)
+        // The square comes from the column width; the crop fills it and is clipped.
+        Theme.stripBackground
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let crop {
+                    Image(decorative: crop, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFill()
+                }
             }
-        }
-        .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         .overlay(alignment: .topTrailing) {
             if face.eyesClosed {

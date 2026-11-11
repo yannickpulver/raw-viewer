@@ -37,7 +37,8 @@ public final class Library {
 
     public private(set) var pinnedFile: MediaFile?
     public var focusedPane: ComparePane = .right
-    public var showInfo: Bool { didSet { preferences.showInfo = showInfo } }
+    /// `I`: the right sidebar with the photo info, the filters and the faces.
+    public var showSidebar: Bool { didSet { preferences.showSidebar = showSidebar } }
     public var filmstripVisible: Bool { didSet { preferences.filmstripVisible = filmstripVisible } }
     public private(set) var sortOrder: SortOrder { didSet { preferences.sortOrder = sortOrder } }
     /// Set on the dashboard, for every folder: while on, `faceIndex` sweeps each folder opened.
@@ -131,7 +132,7 @@ public final class Library {
         self.summaryStore = summaryStore
         self.scheduler = scheduler ?? PreloadScheduler()
         self.faceIndex = faceIndex ?? FaceIndex()
-        self.showInfo = preferences.showInfo
+        self.showSidebar = preferences.showSidebar
         self.filmstripVisible = preferences.filmstripVisible
         self.sortOrder = preferences.sortOrder
         self.showFaces = preferences.showFaces
@@ -793,7 +794,7 @@ public final class Library {
 
     // MARK: - Overlays
 
-    public func toggleInfo() { showInfo.toggle() }
+    public func toggleSidebar() { showSidebar.toggle() }
     public func toggleFilmstrip() {
         guard !files.isEmpty else { return }
         filmstripVisible.toggle()

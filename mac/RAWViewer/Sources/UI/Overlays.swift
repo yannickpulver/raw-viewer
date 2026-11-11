@@ -3,17 +3,14 @@ import SwiftUI
 
 // MARK: - Window toolbar (spec 01 §4)
 
-/// The unified window toolbar: the mode switcher and the subfolder chips at the leading edge
-/// (after the traffic lights, which now live in the same bar), the active rating filter at the
-/// trailing edge. Toolbar items get Liquid Glass for free on macOS 26, so nothing here wraps
-/// itself in `chromeSurface`.
+/// The unified window toolbar: Back at the leading edge (after the traffic lights, which live
+/// in the same bar), the sidebar toggle at the trailing edge. Everything else lives in the
+/// sidebar; while it is closed, an active rating filter shows as a badge next to the toggle.
+/// Toolbar items get Liquid Glass for free on macOS 26, so nothing here wraps itself in
+/// `chromeSurface`.
 struct MainToolbar: ToolbarContent {
     let model: AppModel
     var library: Library { model.library }
-
-    private var anyModeHasFiles: Bool {
-        ViewMode.allCases.contains { library.modeButtonVisible($0) }
-    }
 
     var body: some ToolbarContent {
         if library.folder != nil {
@@ -24,73 +21,31 @@ struct MainToolbar: ToolbarContent {
                 }
                 .help("Back (Esc)")
             }
-            // Items of one placement share a glass group on macOS 26. Back is the only
-            // `.navigation` item and the spacer closes its group, so it gets its own capsule.
-            if #available(macOS 26, *) {
-                ToolbarSpacer(.fixed)
-            }
-        }
-        if anyModeHasFiles {
-            ToolbarItem { modePicker }
-        }
-        if library.showsSubfolderChips {
-            // One toolbar item per chip, so each is a native toolbar toggle with the system's
-            // own backing instead of a bordered button nested inside another item. A group
-            // splits its views into items; `ForEach` as toolbar content needs a newer SDK.
-            ToolbarItemGroup {
-                chip(title: "All (\(library.allChipCount))", folder: nil)
-                ForEach(library.subfolderChips(), id: \.name) { chip in
-                    self.chip(title: "\(chip.name) (\(chip.count))", folder: chip.name)
-                        .opacity(chip.excluded ? 0.5 : 1)
-                        .help(chip.excluded ? "Right-click to include in All"
-                                            : "Right-click to exclude from All")
-                        .contextMenu {
-                            Button(chip.excluded ? "Include in All" : "Exclude from All") {
-                                library.toggleExcluded(chip.name)
-                            }
-                        }
-                }
-            }
-        }
-        if let text = library.filterBadgeText {
-            // Pushes the badge to the trailing edge; default items otherwise pack leading.
+            // Pushes the rest to the trailing edge; default items otherwise pack leading.
             if #available(macOS 26, *) {
                 ToolbarSpacer(.flexible)
             } else {
                 ToolbarItem { Spacer() }
             }
-            ToolbarItem { FilterBadge(text: text) }
-        }
-    }
-
-    private var modePicker: some View {
-        // The setter routes through `switchViewMode(_:toggle: false)`, which is the
-        // mode-button semantics: a direct switch that is ignored for an empty mode.
-        // Modes with no files have no segment at all, so they cannot be picked.
-        let mode = Binding<ViewMode>(
-            get: { library.viewMode },
-            set: { library.switchViewMode($0, toggle: false) })
-
-        // Default control size: the toolbar styles a regular segmented picker as its own item;
-        // a `.small` one ends up as a second bezel floating inside the item's backing.
-        return Picker("View mode", selection: mode) {
-            ForEach(ViewMode.allCases, id: \.self) { mode in
-                if library.modeButtonVisible(mode) {
-                    Text(library.modeButtonLabel(mode)).tag(mode)
-                }
+            if !library.showSidebar, let text = library.filterBadgeText {
+                ToolbarItem { FilterBadge(text: text) }
+            }
+            // While the sidebar is open, the toggle sits in the panel's top-right corner, so it
+            // drops its own glass and reads as part of the panel.
+            if #available(macOS 26, *) {
+                ToolbarItem { sidebarToggle }
+                    .sharedBackgroundVisibility(library.showSidebar ? .hidden : .visible)
+            } else {
+                ToolbarItem { sidebarToggle }
             }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
     }
 
-    /// A subfolder chip: on while it is the active folder filter. Turning the active chip
-    /// "off" just re-selects it, so the binding's setter ignores the new value.
-    private func chip(title: String, folder: String?) -> some View {
-        Toggle(title, isOn: Binding(
-            get: { library.folderFilter == folder },
-            set: { _ in library.setFolderFilter(folder) }))
-        .toggleStyle(.button)
+    private var sidebarToggle: some View {
+        Button { library.toggleSidebar() } label: {
+            Label("Sidebar", systemImage: "sidebar.right")
+        }
+        .help(library.showSidebar ? "Hide sidebar (I)" : "Show sidebar (I)")
     }
 }
 
@@ -107,131 +62,30 @@ struct FilterBadge: View {
     }
 }
 
-// MARK: - Top-right info block
+// MARK: - Loading progress
 
-struct InfoBlock: View {
-    let model: AppModel
+/// `Loading: 42%` at the image area's top-right corner while the background sweep runs.
+/// Spec 01 §4: shown whether or not the sidebar is open.
+struct LoadingBadge: View {
+    let library: Library
     /// Height of the window toolbar; `0` when there is none (full screen with a hidden bar).
     let toolbarHeight: CGFloat
-    var library: Library { model.library }
-
-    /// The position line sits in the toolbar row, centred on the toolbar items. An active
-    /// rating filter puts its badge at that spot, so the block then drops below the toolbar.
-    private var inToolbarRow: Bool {
-        library.showInfo && !library.files.isEmpty && library.filterBadgeText == nil && toolbarHeight >= 20
-    }
 
     var body: some View {
         let fraction = library.scheduler.progressFraction
-        VStack(alignment: .trailing, spacing: 0) {
-            // Text only: clicks and window drags pass through to the toolbar and canvas.
-            Group {
-                if library.showInfo, let file = library.currentFile {
-                    InfoRow(name: file.name, date: library.captureDateText,
-                            rating: library.rating(for: file.url), position: library.positionText)
-                        .padding(.horizontal, 12).padding(.vertical, inToolbarRow ? 0 : 6)
-                        .frame(height: inToolbarRow ? toolbarHeight : nil)
-                }
-                // Spec 01 §4: deliberately not gated on showInfo.
-                if !library.files.isEmpty && fraction < 1 {
-                    Text("Loading: \(Int(fraction * 100))%")
-                        .font(.system(size: 11).monospacedDigit())
-                        .foregroundStyle(Theme.dimText)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .chromeSurface(.regularMaterial, cornerRadius: 6, scrim: 0.45)
-                }
-            }
-            .allowsHitTesting(false)
-            if library.showsFaces, let file = library.currentFile {
-                FacePanel(model: model, file: file)
-                    .padding(.top, 4)
-            }
+        if !library.files.isEmpty && fraction < 1 {
+            Text("Loading: \(Int(fraction * 100))%")
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundStyle(Theme.dimText)
+                .padding(.horizontal, 10).padding(.vertical, 4)
+                .chromeSurface(.regularMaterial, cornerRadius: 6, scrim: 0.45)
+                .allowsHitTesting(false)
+                .padding(.top, toolbarHeight + 10).padding(.trailing, 10)
         }
-        .padding(.top, inToolbarRow ? 0 : toolbarHeight + 10).padding(.trailing, 10)
     }
 }
 
-/// `1/105` as the title, `DSCF1703.RAF · Sun, 20 Sep · 11:50 · ★★★☆☆` as the subtitle, both
-/// right-aligned so the pair fits the toolbar row.
-private struct InfoRow: View {
-    let name: String
-    let date: String
-    let rating: Int
-    let position: String
-
-    var body: some View {
-        VStack(alignment: .trailing, spacing: 1) {
-            Text(position)
-                .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white)
-            HStack(spacing: 5) {
-                Text(name)
-                    .fontWeight(.medium)
-                    .foregroundStyle(Color.white.opacity(0.9))
-                dot
-                Text(date)
-                    .monospacedDigit()
-                    .foregroundStyle(Color.white.opacity(0.7))
-                dot
-                Text(Rating.stars(rating))
-                    .foregroundStyle(rating == Rating.rejected ? Theme.rejectRed
-                                     : rating > 0 ? Theme.ratingDot : Color.white.opacity(0.6))
-            }
-            .font(.system(size: 11))
-        }
-        .lineLimit(1)
-        .fixedSize()
-        .chromeTextShadow()
-    }
-
-    private var dot: some View {
-        Text("·").fontWeight(.bold).foregroundStyle(Color.white.opacity(0.45))
-    }
-}
-
-// MARK: - Bottom toolbars
-
-struct FilterToolbar: View {
-    let model: AppModel
-    var library: Library { model.library }
-
-    var body: some View {
-        // `setRatingFilter` is async (it sweeps every rating off disk first), so the setter
-        // hands the work to a Task instead of mutating anything itself.
-        let filter = Binding<Int>(
-            get: { library.ratingFilter.value },
-            set: { value in Task { await library.setRatingFilter(value) } })
-
-        HStack(spacing: 10) {
-            Button { model.openFolderPanel() } label: {
-                Image(systemName: "folder")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .help("Open folder…")
-
-            Picker("Rating filter", selection: filter) {
-                Text("All").tag(0)
-                Text("0").tag(RatingFilter.unratedValue)
-                Text("1+").tag(1)
-                Text("2+").tag(2)
-                Text("3+").tag(3)
-                Text("4+").tag(4)
-                Text("5").tag(5)
-                Image(systemName: "xmark").tag(-1)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
-            .fixedSize()
-        }
-        // The toolbar sits straight on the photo, so it gets its own material backing
-        // rather than relying on the controls' own translucency.
-        .padding(4)
-        .chromeSurface(.regularMaterial, glass: false)
-        .padding(10)
-    }
-}
+// MARK: - Bottom-left buttons
 
 struct CornerButtons: View {
     let model: AppModel
@@ -248,6 +102,8 @@ struct CornerButtons: View {
         }
         .padding(4)
         .chromeSurface(.regularMaterial, glass: false)
+        // Keys go through the app's dispatcher, so no button here should show a focus ring.
+        .focusEffectDisabled()
         .padding(10)
     }
 }
@@ -332,7 +188,7 @@ struct HelpOverlay: View {
       M            Toggle Video mode
       A            Toggle All files mode
       Space        Play/Pause video
-      I            Toggle info overlay
+      I            Toggle sidebar
       ⌘S          Toggle filmstrip
       G            Toggle grid view
       ⇧S          Group by scene

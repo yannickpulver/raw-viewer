@@ -167,6 +167,27 @@ timer; selection changes repaint immediately (`viewer.py:242`, `:276`).
 
 All positions are relative to the window. Listed roughly top to bottom.
 
+Mac app change (0.5.12): a **right sidebar** (`I`, or the `sidebar.right` toolbar button)
+replaces the mode switcher, the subfolder chips, the position counter, the info line, the
+face crops and the bottom-right filter toolbar. It is a floating panel (rounded, inset 8 pt
+from the window edges, reaching up into the toolbar row) beside the image area, so the
+image ends to its left; the filmstrip keeps the full window width below it. While it is
+open, the toolbar's sidebar toggle drops its glass and sits in the panel's top-right corner. Three sections:
+
+- **Filter**: file kind (only with more than one kind), subfolders as a list (`All` first,
+  right-click excludes), the rating filter (8 segments as below), the sort order and
+  Group by Scene. Its title shares the toolbar row with the sidebar toggle.
+- **Photo**: position text, file name, capture date, five clickable stars (a click on the
+  current star clears it; like the keys, a click auto-advances) and a reject toggle.
+  Disabled during a duel.
+- **Faces**: the face crops, four per row, while faces show (single view).
+
+The toolbar keeps Back (leading) and the sidebar toggle (trailing). While the sidebar is
+closed, an active rating filter shows as an amber badge (`≥3★ · 42/137`) next to the
+toggle. The loading progress stays on the image area's top-right corner either way. The
+open/closed state persists (stored under the old `showInfo` key, default open). The
+sections below describe the Python app's floating chrome the sidebar replaced.
+
 ### Mode switcher (top-left)
 
 Three checkable buttons, `RAW` / `JPG` / `MOV` (`viewer.py:892`).

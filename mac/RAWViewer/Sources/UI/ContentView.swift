@@ -16,14 +16,20 @@ struct ContentView: View {
         let showFilmstrip = !files.isEmpty && library.filmstripVisible && library.displayMode != .grid
 
         VStack(spacing: 0) {
-            ZStack {
-                // Only the image area runs under the transparent toolbar; the overlays stay
-                // inside the safe area so nothing of theirs can hide behind a toolbar item.
-                contentArea
-                    .ignoresSafeArea(edges: .top)
-                overlays
+            // The sidebar sits beside the image area only; the filmstrip below keeps the full width.
+            HStack(spacing: 0) {
+                ZStack {
+                    // Only the image area runs under the transparent toolbar; the overlays stay
+                    // inside the safe area so nothing of theirs can hide behind a toolbar item.
+                    contentArea
+                        .ignoresSafeArea(edges: .top)
+                    overlays
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if library.folder != nil && library.showSidebar {
+                    Sidebar(model: model)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showFilmstrip {
                 FilmstripView(
@@ -167,18 +173,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var overlays: some View {
-        // The info block reaches up into the toolbar row. The reader stays inside the safe area,
-        // because only there does it report the toolbar height; the block itself then ignores
-        // that area to climb into the row. Its text lets clicks and window drags through; only
-        // the face crops below it take clicks.
+        // The reader stays inside the safe area, because only there does it report the toolbar
+        // height; the badge then ignores that area and pads itself down below the toolbar.
         GeometryReader { geometry in
-            InfoBlock(model: model, toolbarHeight: geometry.safeAreaInsets.top)
+            LoadingBadge(library: library, toolbarHeight: geometry.safeAreaInsets.top)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .ignoresSafeArea(edges: .top)
-        }
-        ZStack(alignment: .bottomTrailing) {
-            Color.clear
-            if library.hasLoadedFolder { FilterToolbar(model: model) }
         }
         ZStack(alignment: .bottomLeading) {
             Color.clear

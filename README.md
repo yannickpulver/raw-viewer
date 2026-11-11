@@ -18,9 +18,10 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Fast preview using embedded JPEGs
 - Star ratings (0-5) saved to XMP sidecar files
 - Filmstrip navigation
+- Sidebar (`I`) with the photo info, clickable stars, filters, sort order and faces
 - Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
-- Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers under the info block, click a face to zoom in
+- Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers in the sidebar, click a face to zoom in
 - Sort oldest first, newest first, or by best faces (most sharp, open-eyed faces first)
 - Video mode (MOV/MP4 playback)
 - All mode: RAW, JPEG and video in one timeline
@@ -68,7 +69,7 @@ python main.py "/path/to/photos"
 | `Shift+S` | Group by scene |
 | `V` | Duel: `←` / `→` keeps one, `↓` both, `Cmd+Z` undoes |
 | `R` | Rotate image 90° (view only) |
-| `I` | Toggle info overlay |
+| `I` | Toggle sidebar |
 | `F` | Show / hide faces (needs face detection on) |
 | `H` | Toggle help overlay |
 | `J` | Toggle JPEG mode |

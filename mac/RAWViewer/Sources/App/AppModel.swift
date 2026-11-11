@@ -279,7 +279,7 @@ public final class AppModel {
         if modifiers.contains(.command), ["h", "m", ","].contains(characters) { return false }
 
         switch characters {
-        case "i": library.toggleInfo(); return true
+        case "i": library.toggleSidebar(); return true
         case "e": if filesLoaded { library.jumpToLast() }; return true
         case "o": if filesLoaded { library.revealInFinder() }; return true
         case "j": library.switchViewMode(.jpeg, toggle: true); return true
