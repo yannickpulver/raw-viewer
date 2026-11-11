@@ -114,7 +114,7 @@ struct AppCommands: Commands {
             Button("Toggle Filmstrip") { library.toggleFilmstrip() }
                 .keyboardShortcut("s", modifiers: .command)
                 .disabled(!model.filesLoaded)
-            Button(Self.title("Toggle Info Overlay", "I")) { library.toggleInfo() }
+            Button(Self.title("Toggle Sidebar", "I")) { library.toggleSidebar() }
             // Mac app addition: no Python-app equivalent.
             Toggle(Self.title("Show Faces", "F"), isOn: Binding(get: { library.showFaces },
                                                                 set: { _ in library.toggleFaces() }))

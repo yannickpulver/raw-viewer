@@ -33,7 +33,8 @@ public final class Preferences {
         public static let groupScenes = "groupScenes"
     }
 
-    public var showInfo: Bool {
+    /// Stored under the old info-overlay key, so the overlay's on/off carries over.
+    public var showSidebar: Bool {
         get { defaults.bool(forKey: Keys.showInfo) }
         set { defaults.set(newValue, forKey: Keys.showInfo) }
     }

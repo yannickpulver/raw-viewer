@@ -110,7 +110,7 @@ final class PersistenceTests: XCTestCase {
 
     func testPreferencesDefaults() {
         let preferences = Preferences(defaults: defaults)
-        XCTAssertTrue(preferences.showInfo)
+        XCTAssertTrue(preferences.showSidebar)
         XCTAssertTrue(preferences.filmstripVisible)
         XCTAssertFalse(preferences.didImportLegacyCache)
         preferences.filmstripVisible = false
