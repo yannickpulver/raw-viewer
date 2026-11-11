@@ -12,7 +12,7 @@ public final class AppModel {
 
     public static let shared = AppModel()
 
-    public let library = Library()
+    public let library: Library
     let video = VideoController()
 
     /// Checks the appcast at launch and every 24h, and shows Sparkle's own dialog. Local builds
@@ -38,7 +38,10 @@ public final class AppModel {
     var faceFocus: CGRect?
     var statsTick = 0
 
-    private init() {}
+    /// The app uses `shared`; tests pass a `Library` with temporary stores.
+    init(library: Library? = nil) {
+        self.library = library ?? Library()
+    }
 
     var filesLoaded: Bool { !library.files.isEmpty }
     /// The current file is a video: in MOV mode, or a clip inside ALL.
@@ -93,13 +96,16 @@ public final class AppModel {
 
     /// Spec 02 §1-2, plus the mac app's overlays and multi-selection: help → stats →
     /// multi-selection → grid → duel → compare → close the folder.
+    /// One level up per press: overlay, multi-selection, duel or compare, then the single
+    /// view goes to the grid and the grid back to the start screen. Mac app change: the single
+    /// view used to close the folder and the grid to return to the single view.
     func escape() {
         if showHelp { showHelp = false; return }
         if showStats { showStats = false; return }
         if library.clearMultiSelection() { return }
-        if isGrid { library.toggleGrid(); return }
         if library.displayMode == .duel { library.toggleDuel(); return }
         if library.isCompareActive { library.exitCompare(); return }
+        if library.displayMode == .single, !library.files.isEmpty { library.showGrid(true); return }
         library.closeFolder()
     }
 

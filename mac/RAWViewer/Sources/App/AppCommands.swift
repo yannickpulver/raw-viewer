@@ -39,7 +39,7 @@ struct AppCommands: Commands {
                 }
             }
             Divider()
-            Button(Self.title("Close Folder", "Esc")) { model.escape() }
+            Button("Close Folder") { library.closeFolder() }
             Divider()
             Button(Self.title("Reveal in Finder", "O")) { library.revealInFinder() }
                 .disabled(!model.filesLoaded)

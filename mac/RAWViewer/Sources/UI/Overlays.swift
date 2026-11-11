@@ -14,7 +14,7 @@ struct MainToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         if library.folder != nil {
-            // Same ladder as `Esc`: grid → single, compare → single, otherwise back to the dashboard.
+            // Same ladder as `Esc`: duel / compare → single → grid → back to the dashboard.
             ToolbarItem(placement: .navigation) {
                 Button { model.escape() } label: {
                     Label("Back", systemImage: "chevron.left")
@@ -205,7 +205,7 @@ struct HelpOverlay: View {
       O            Show in Finder
       ⌘L          Open all in Lightroom
       ⌘D          Export to DaVinci Resolve
-      Esc          Close overlay, selection, grid, then folder
+      Esc          Up a level: single → grid → close folder
       ⌘Q          Quit
 
       ⇧Click       Select range (grid/filmstrip)

@@ -86,7 +86,7 @@ python main.py "/path/to/photos"
 | `Cmd+L` | Open in Lightroom |
 | `Cmd+D` | Export to DaVinci Resolve |
 | `Cmd+S` | Toggle filmstrip |
-| `Esc` | Close folder |
+| `Esc` | Up a level: single image → grid → close folder |
 | `Cmd+Q` / `Cmd+W` | Quit |
 
 Pinch to zoom, drag to pan, two-finger swipe to navigate. Scroll wheel on filmstrip.
