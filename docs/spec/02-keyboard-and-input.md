@@ -79,7 +79,8 @@ next / previous scene while scenes are grouped (spec 01 §8 addendum). `V`
 starts the duel, where `←` / `→` / `↓` choose and `⌘Z` undoes; `Esc` leaves it
 before closing compare or the folder. `U` toggles Unviewed Only (spec 01 §8
 addendum). `⌥↓` / `⌥↑` and Page Down / Page Up jump between days in the grid
-and the single view (spec 01 §8 addendum).
+and the single view, `K` expands or collapses the current stack (spec 01 §8
+addendum).
 
 ### Bindings with no modifier check
 

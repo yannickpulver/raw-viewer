@@ -108,6 +108,10 @@ struct AppCommands: Commands {
                 .disabled((library.days?.count ?? 0) < 2)
             Button(Self.title("Previous Day", "⌥↑")) { library.navigateDay(by: -1) }
                 .disabled((library.days?.count ?? 0) < 2)
+            Button(Self.title(library.isCurrentStackExpanded ? "Collapse Stack" : "Expand Stack", "K")) {
+                library.toggleStack()
+            }
+            .disabled(library.currentStack == nil)
         }
 
         CommandGroup(replacing: .toolbar) {

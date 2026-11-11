@@ -273,6 +273,7 @@ public final class AppModel {
             // Mac app addition: no Python-app equivalent.
             case "v": library.toggleDuel(); return true
             case "u": library.toggleUnviewed(); return true
+            case "k": if filesLoaded { library.toggleStack() }; return true
             default: break
             }
         }

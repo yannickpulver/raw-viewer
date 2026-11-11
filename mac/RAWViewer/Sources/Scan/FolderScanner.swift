@@ -55,24 +55,24 @@ public struct FolderScanner: Sendable {
         // property parsing), so it runs `Self.dateConcurrency` files at a time. Results are
         // written back by index, which keeps the input order — and therefore the sort — exactly
         // as deterministic as the sequential version was.
-        var dates = [Date?](repeating: nil, count: total)
+        var infos = [CaptureInfo?](repeating: nil, count: total)
         var completed = 0
         var next = 0
 
-        try await withThrowingTaskGroup(of: (Int, Date).self) { group in
+        try await withThrowingTaskGroup(of: (Int, CaptureInfo).self) { group in
             let initial = min(Self.dateConcurrency, total)
             while next < initial {
                 let offset = next
                 let candidate = candidates[offset]
                 group.addTask {
                     try Task.checkCancellation()
-                    return (offset, await Self.captureDate(for: candidate.url,
+                    return (offset, await Self.captureInfo(for: candidate.url,
                                                            kind: candidate.kind, cache: cache))
                 }
                 next += 1
             }
-            while let (offset, date) = try await group.next() {
-                dates[offset] = date
+            while let (offset, info) = try await group.next() {
+                infos[offset] = info
                 completed += 1
                 if completed % 5 == 0 || completed == total {
                     progress?(Double(completed) / Double(total))
@@ -83,7 +83,7 @@ public struct FolderScanner: Sendable {
                     let candidate = candidates[queued]
                     group.addTask {
                         try Task.checkCancellation()
-                        return (queued, await Self.captureDate(for: candidate.url,
+                        return (queued, await Self.captureInfo(for: candidate.url,
                                                                kind: candidate.kind, cache: cache))
                     }
                     next += 1
@@ -97,8 +97,9 @@ public struct FolderScanner: Sendable {
         for (offset, candidate) in candidates.enumerated() {
             let file = MediaFile(url: candidate.url,
                                  kind: candidate.kind,
-                                 captureDate: dates[offset] ?? Date(timeIntervalSince1970: 0),
-                                 subfolder: Self.subfolderName(for: candidate.url, root: root))
+                                 captureDate: infos[offset]?.date ?? Date(timeIntervalSince1970: 0),
+                                 subfolder: Self.subfolderName(for: candidate.url, root: root),
+                                 exposure: infos[offset]?.exposure)
             switch candidate.kind {
             case .raw: raw.append(file)
             case .jpeg: jpeg.append(file)
@@ -158,44 +159,57 @@ public struct FolderScanner: Sendable {
         return formatter
     }()
 
+    typealias CaptureInfo = (date: Date, exposure: Exposure?)
+
     /// Spec 03 §5: EXIF `DateTimeOriginal`, then birthtime, then mtime.
     static func captureDate(for url: URL, kind: MediaKind, cache: DateCache?) async -> Date {
+        await captureInfo(for: url, kind: kind, cache: cache).date
+    }
+
+    /// The capture date plus, for stills, the EXIF exposure, read in the same ImageIO pass.
+    static func captureInfo(for url: URL, kind: MediaKind, cache: DateCache?) async -> CaptureInfo {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         let modified = (attributes?[.modificationDate] as? Date) ?? Date(timeIntervalSince1970: 0)
         let mtime = modified.timeIntervalSince1970
 
-        if let cached = cache?.date(forPath: url.path, mtime: mtime) { return cached }
+        if let cached = cache?.info(forPath: url.path, mtime: mtime) { return cached }
 
         var result: Date?
+        var exposure: Exposure?
         if kind == .video {
             result = await videoCreationDate(url)
         } else {
-            result = exifDate(url)
+            (result, exposure) = exifInfo(url)
         }
         if result == nil {
             result = (attributes?[.creationDate] as? Date) ?? modified
         }
         let date = result ?? modified
-        cache?.store(path: url.path, mtime: mtime, date: date)
-        return date
+        cache?.store(path: url.path, mtime: mtime, date: date, exposure: exposure)
+        return (date, exposure)
     }
 
     /// EXIF `DateTimeOriginal` via ImageIO, parsed in the local time zone. Spec 03 §5.
-    static func exifDate(_ url: URL) -> Date? {
+    static func exifDate(_ url: URL) -> Date? { exifInfo(url).date }
+
+    static func exifInfo(_ url: URL) -> (date: Date?, exposure: Exposure?) {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
-        else { return nil }
+        else { return (nil, nil) }
 
-        if let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any] {
-            if let value = exif[kCGImagePropertyExifDateTimeOriginal] as? String,
-               let date = exifFormatter.date(from: value) { return date }
-            if let value = exif[kCGImagePropertyExifDateTimeDigitized] as? String,
-               let date = exifFormatter.date(from: value) { return date }
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+        var exposure: Exposure?
+        if let time = exif?[kCGImagePropertyExifExposureTime] as? Double, time > 0 {
+            exposure = Exposure(time: time, bias: exif?[kCGImagePropertyExifExposureBiasValue] as? Double ?? 0)
         }
+        if let value = exif?[kCGImagePropertyExifDateTimeOriginal] as? String,
+           let date = exifFormatter.date(from: value) { return (date, exposure) }
+        if let value = exif?[kCGImagePropertyExifDateTimeDigitized] as? String,
+           let date = exifFormatter.date(from: value) { return (date, exposure) }
         if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any],
            let value = tiff[kCGImagePropertyTIFFDateTime] as? String,
-           let date = exifFormatter.date(from: value) { return date }
-        return nil
+           let date = exifFormatter.date(from: value) { return (date, exposure) }
+        return (nil, exposure)
     }
 
     static func videoCreationDate(_ url: URL) async -> Date? {

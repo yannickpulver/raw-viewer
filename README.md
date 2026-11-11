@@ -26,7 +26,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Video mode (MOV/MP4 playback)
 - All mode: RAW, JPEG and video in one timeline
 - Grid grouped by day, with a day list in the sidebar to jump between days (`Option+↑/↓`)
-- Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip
+- Group by scene (optional): frames shot within a minute of each other form a scene, with its own rows in the grid and gaps in the filmstrip; exposure brackets (HDR) fold into one stack tile, rated together (`K` expands)
 - Reopening a folder continues at the photo where you left off
 - Unviewed only: show just the frames no earlier session opened; what you view now stays in the list
 - Duel: two frames of a scene side by side with shared zoom; keep one or both until the scene's best get 2★ (`Cmd+1`, then `V`)
@@ -70,7 +70,8 @@ python main.py "/path/to/photos"
 | `S` | Jump to first (start) |
 | `E` | Jump to last (end) |
 | `Shift+R` | Jump to last rated |
-| `Shift+S` | Group by scene |
+| `Shift+S` | Group by scene (and stacks) |
+| `K` | Expand / collapse stack |
 | `V` | Duel: `←` / `→` keeps one, `↓` both, `Cmd+Z` undoes |
 | `U` | Unviewed only (not opened in an earlier session) |
 | `R` | Rotate image 90° (view only) |

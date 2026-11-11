@@ -22,6 +22,8 @@ struct FilmstripModel {
     /// so it can't go stale relative to `isSelected` within the same SwiftUI body pass.
     var selectedURLs: () -> [URL]
     var thumb: (URL) -> CGImage?
+    /// See `GridModel.stackSize`.
+    var stackSize: (URL) -> Int
 }
 
 /// Always-on 18 px horizontal scroller drawn to spec 01 §3: `#777` pill handle (radius 5,
@@ -153,6 +155,8 @@ final class FilmstripContentView: NSView {
                 context.stroke(CGRect(x: x - 2, y: y - 2, width: 84, height: 84).insetBy(dx: 1.5, dy: 1.5))
             }
 
+            StackBadge.draw(count: model.stackSize(file.url), cellX: x, cellY: y, side: cell, compact: true)
+
             let rating = model.ratings[file.url] ?? 0
             if rating > 0 {
                 context.setFillColor(NSColor(red: 1, green: 200.0 / 255.0, blue: 50.0 / 255.0, alpha: 1).cgColor)
@@ -206,7 +210,8 @@ final class FilmstripContentView: NSView {
             urls = model.selectedURLs()
         } else {
             onClick?(index, [])
-            urls = [model.files[index].url]
+            // The selection is now just that cell, a collapsed stack resolved into its frames.
+            urls = model.selectedURLs()
         }
 
         let x = layout.x(of: index)

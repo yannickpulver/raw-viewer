@@ -28,6 +28,37 @@ struct GridModel {
     var selectedURLs: () -> [URL]
     var thumb200: (URL) -> CGImage?
     var thumb80: (URL) -> CGImage?
+    /// Frames behind a collapsed stack's cover (`Library.collapsedStackSize`), 0 otherwise.
+    var stackSize: (URL) -> Int
+}
+
+/// The `⧉ 3` pill in the top-right corner of a collapsed stack's cover.
+enum StackBadge {
+    static func draw(count: Int, cellX: CGFloat, cellY: CGFloat, side: CGFloat, compact: Bool) {
+        guard count > 1 else { return }
+        let fontSize: CGFloat = compact ? 9 : 11
+        let text = NSAttributedString(string: "\(count)", attributes: [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: NSColor.white,
+        ])
+        let config = NSImage.SymbolConfiguration(pointSize: fontSize, weight: .semibold)
+            .applying(.init(paletteColors: [.white]))
+        let symbol = NSImage(systemSymbolName: "square.stack.fill", accessibilityDescription: "Stack")?
+            .withSymbolConfiguration(config)
+        let textSize = text.size()
+        let symbolSize = symbol?.size ?? .zero
+        let height = (compact ? 14 : 18) as CGFloat
+        let padding = (compact ? 4 : 6) as CGFloat
+        let width = padding * 2 + symbolSize.width + 3 + textSize.width
+        let inset = (compact ? 3 : 6) as CGFloat
+        let pill = NSRect(x: cellX + side - width - inset, y: cellY + inset, width: width, height: height)
+        NSColor(white: 0, alpha: 0.65).setFill()
+        NSBezierPath(roundedRect: pill, xRadius: height / 2, yRadius: height / 2).fill()
+        symbol?.draw(in: NSRect(x: pill.minX + padding, y: pill.midY - symbolSize.height / 2,
+                                width: symbolSize.width, height: symbolSize.height),
+                     from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        text.draw(at: NSPoint(x: pill.minX + padding + symbolSize.width + 3, y: pill.midY - textSize.height / 2))
+    }
 }
 
 extension GridModel {
@@ -99,6 +130,8 @@ final class GridCanvasView: NSView {
                 context.stroke(CGRect(x: x - 2, y: y - 2, width: side + 4, height: side + 4).insetBy(dx: 1.5, dy: 1.5))
             }
 
+            StackBadge.draw(count: model.stackSize(file.url), cellX: x, cellY: y, side: side, compact: false)
+
             let rating = model.ratings[file.url] ?? 0
             if rating > 0 {
                 context.setFillColor(NSColor(red: 1, green: 200.0 / 255.0, blue: 50.0 / 255.0, alpha: 1).cgColor)
@@ -147,9 +180,13 @@ final class GridCanvasView: NSView {
         }
     }
 
+    /// Frames, not tiles: a collapsed stack counts every frame it holds.
     private func counts(_ model: GridModel, _ range: Range<Int>) -> String {
-        let picked = model.files[range].filter { (model.ratings[$0.url] ?? 0) > 0 }.count
-        var parts = [range.count == 1 ? "1 frame" : "\(range.count) frames"]
+        let frames = model.files[range].reduce(0) { $0 + max(1, model.stackSize($1.url)) }
+        let picked = model.files[range].reduce(0) {
+            $0 + ((model.ratings[$1.url] ?? 0) > 0 ? max(1, model.stackSize($1.url)) : 0)
+        }
+        var parts = [frames == 1 ? "1 frame" : "\(frames) frames"]
         if picked > 0 { parts.append("\(picked) picked") }
         return parts.joined(separator: "  ·  ")
     }
@@ -212,7 +249,8 @@ final class GridCanvasView: NSView {
             urls = model.selectedURLs()
         } else {
             onClick?(index, [])
-            urls = [model.files[index].url]
+            // The selection is now just that cell, a collapsed stack resolved into its frames.
+            urls = model.selectedURLs()
         }
 
         let origin = geometry.cellOrigin(index: index)

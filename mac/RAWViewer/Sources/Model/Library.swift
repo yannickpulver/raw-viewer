@@ -403,10 +403,15 @@ public final class Library {
     /// just scrolling the cell into view.
     public private(set) var dayJumpRevision = 0
 
-    /// One row per day for the sidebar: its first file's date and how many files it holds.
+    /// One row per day for the sidebar: its first file's date and how many frames it holds,
+    /// the frames of collapsed stacks included.
     public var dayList: [(date: Date, count: Int)] {
         guard let days else { return [] }
-        return (0..<days.count).map { (files[days.starts[$0]].captureDate, days.range(of: $0).count) }
+        let state = self.state
+        return (0..<days.count).map { day in
+            (files[days.starts[day]].captureDate,
+             files[days.range(of: day)].reduce(0) { $0 + state.members(of: $1).count })
+        }
     }
 
     public var currentDay: Int? { days.map { $0.scene(of: state.index) } }
@@ -470,7 +475,7 @@ public final class Library {
     /// The selected files, resolved back into current timeline order.
     public var selectedFiles: [MediaFile] {
         let selected = state.selectedURLs
-        return files.filter { selected.contains($0.url) }
+        return state.expanded(files.filter { selected.contains($0.url) })
     }
 
     public func isSelected(index: Int) -> Bool {
@@ -548,13 +553,16 @@ public final class Library {
         rate(rating(for: target.url) == Rating.rejected ? 0 : Rating.rejected)
     }
 
+    /// A collapsed stack's cover rates every frame of the stack.
     private func apply(rating value: Int, to file: MediaFile) {
-        let previous = rating(for: file.url)
-        ratings[file.url] = value
+        for frame in state.members(of: file) {
+            let previous = rating(for: frame.url)
+            ratings[frame.url] = value
+            updateShootStats(previous: previous, new: value)
+            enqueueWrite(url: frame.url, rating: value, kind: frame.kind)
+        }
         ratingsRevision &+= 1
-        updateShootStats(previous: previous, new: value)
         scheduleFolderSummarySave()
-        enqueueWrite(url: file.url, rating: value, kind: file.kind)
     }
 
     private func enqueueWrite(url: URL, rating value: Int, kind: MediaKind) {
@@ -742,6 +750,43 @@ public final class Library {
             endDuel()
             displayMode = .grid
         }
+    }
+
+    // MARK: - Stacks (mac app addition)
+
+    /// The frames of the stack the current file belongs to, or `nil` when it is a single frame.
+    public var currentStack: [MediaFile]? {
+        guard let file = currentFile, let cover = state.cover(of: file.url) else { return nil }
+        return state.stacks[cover]
+    }
+
+    public var isCurrentStackExpanded: Bool {
+        guard let file = currentFile, let cover = state.cover(of: file.url) else { return false }
+        return state.expandedStacks.contains(cover)
+    }
+
+    /// Frames behind a collapsed cover, for the grid and filmstrip badge; 0 for anything else.
+    public func collapsedStackSize(_ url: URL) -> Int {
+        guard let frames = state.stacks[url], !state.expandedStacks.contains(url) else { return 0 }
+        return frames.count
+    }
+
+    /// `K`: show the current stack frame by frame, or fold it back into its cover.
+    public func toggleStack() {
+        guard let file = currentFile else { return }
+        guard let cover = state.cover(of: file.url) else {
+            post(SnackbarEvent(text: groupScenes ? "Not part of a stack" : "Stacks need Group by Scene (⇧S)",
+                               durationMs: 2000))
+            return
+        }
+        if state.expandedStacks.contains(cover) {
+            state.expandedStacks.remove(cover)
+        } else {
+            state.expandedStacks.insert(cover)
+        }
+        scheduler.stopBackgroundSweep()
+        state.applyFilters(ratings: ratings, faceScores: faceIndex.scores, viewedBefore: viewedBefore)
+        afterFilterChange()
     }
 
     /// The sidebar's Single / Grid switch. Single from the duel ends the duel.
@@ -976,7 +1021,7 @@ public final class Library {
             return nil
         }
         await flushPendingWrites()
-        pendingMoveShownSet = files.map(\.url)
+        pendingMoveShownSet = state.expanded(files).map(\.url)
         return "Move \(pendingMoveShownSet.count) files to \u{201c}\(destination.lastPathComponent)\u{201d}?"
     }
 
@@ -1007,7 +1052,7 @@ public final class Library {
     /// `Cmd+L` — hand the whole visible list to Lightroom Classic. Spec 01 §22.
     public func openInLightroom() {
         guard !files.isEmpty else { return }
-        if !Lightroom.open(files: files.map(\.url)) {
+        if !Lightroom.open(files: state.expanded(files).map(\.url)) {
             post(SnackbarEvent(text: "Adobe Lightroom Classic not found", durationMs: 4000))
         }
     }
@@ -1030,7 +1075,7 @@ public final class Library {
         }
 
         await loadAllRatings()
-        let snapshot = files.map(\.url)
+        let snapshot = state.expanded(files).map(\.url)
         let ratingSnapshot = ratings
         let name = folder?.lastPathComponent ?? "Untitled"
 
@@ -1110,7 +1155,9 @@ public final class Library {
     /// only a thumbnail) and saves it as the place to come back to, 2 s after the last move.
     private func noteCurrentFile() {
         guard viewedFolder != nil, let file = currentFile else { return }
-        if displayMode != .grid { viewedNow.insert(ViewedStore.key(file.url)) }
+        if displayMode != .grid {
+            for frame in state.members(of: file) { viewedNow.insert(ViewedStore.key(frame.url)) }
+        }
         viewedSaveTask?.cancel()
         viewedSaveTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)

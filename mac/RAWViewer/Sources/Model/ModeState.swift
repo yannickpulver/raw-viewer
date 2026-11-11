@@ -42,6 +42,28 @@ public struct ModeState: Sendable {
     /// The days of `files` in the date orders, otherwise `nil`. Set by `applyFilters`.
     public private(set) var days: Scenes?
 
+    /// Every multi-exposure stack while scenes are grouped: cover URL → all its frames in
+    /// timeline order. A collapsed stack shows only its cover in `files`. Set by `applyFilters`.
+    public private(set) var stacks: [URL: [MediaFile]] = [:]
+    /// Each stacked frame's cover.
+    private var coverOf: [URL: URL] = [:]
+    /// Covers of the stacks shown frame by frame (`K`).
+    public var expandedStacks: Set<URL> = []
+
+    /// The cover of the stack `url` belongs to, if any.
+    public func cover(of url: URL) -> URL? { coverOf[url] }
+
+    /// A collapsed stack's cover stands for all its frames; anything else for itself.
+    public func members(of file: MediaFile) -> [MediaFile] {
+        guard let frames = stacks[file.url], !expandedStacks.contains(file.url) else { return [file] }
+        return frames
+    }
+
+    /// `list` with every collapsed cover replaced by its frames: what exports and moves act on.
+    public func expanded(_ list: [MediaFile]) -> [MediaFile] {
+        stacks.isEmpty ? list : list.flatMap(members(of:))
+    }
+
     /// The grid's sections: days, cut further into scenes while those are grouped.
     public var gridGroups: Scenes {
         switch (days, scenes) {
@@ -103,14 +125,45 @@ public struct ModeState: Sendable {
                 return left != right ? left > right : lhs.offset < rhs.offset
             }.map(\.element)
         }
+        collapseStacks()
         scenes = groupsScenes && sortOrder != .bestFaces ? Scenes(files: files) : nil
         days = sortOrder != .bestFaces && !files.isEmpty ? Scenes(days: files) : nil
-        if let previous, let kept = files.firstIndex(of: previous) {
+        if let previous, let kept = files.firstIndex(of: previous)
+            ?? coverOf[previous.url].flatMap({ cover in files.firstIndex { $0.url == cover } }) {
             index = kept
         } else {
             index = 0
         }
         pruneSelection()
+    }
+
+    /// Finds the stacks (only while scenes are grouped, in the date orders) and leaves each
+    /// collapsed one as just its cover.
+    private mutating func collapseStacks() {
+        stacks = [:]
+        coverOf = [:]
+        guard groupsScenes, sortOrder != .bestFaces else { return }
+        let ranges = Stacks.ranges(in: files)
+        guard !ranges.isEmpty else { return }
+        var collapsed: [MediaFile] = []
+        collapsed.reserveCapacity(files.count)
+        var next = 0
+        for range in ranges {
+            collapsed.append(contentsOf: files[next..<range.lowerBound])
+            let frames = Array(files[range])
+            let cover = Stacks.cover(of: frames)
+            stacks[cover.url] = frames
+            for frame in frames { coverOf[frame.url] = cover.url }
+            if expandedStacks.contains(cover.url) {
+                collapsed.append(contentsOf: frames)
+            } else {
+                collapsed.append(cover)
+            }
+            next = range.upperBound
+        }
+        collapsed.append(contentsOf: files[next...])
+        files = collapsed
+        expandedStacks.formIntersection(stacks.keys)
     }
 
     /// Drops selected URLs that no longer survive the filter. `anchorIndex` re-derives itself

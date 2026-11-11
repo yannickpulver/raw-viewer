@@ -158,6 +158,9 @@ private struct PhotoInfo: View {
                 .foregroundStyle(.secondary)
         }
         .lineLimit(1)
+        if let stack = library.currentStack {
+            StackRow(library: library, frames: stack)
+        }
         RatingPicker(rating: library.rating(for: file.url),
                      rate: { library.rate($0) },
                      reject: { library.toggleReject() })
@@ -386,5 +389,42 @@ private struct DayList: View {
         var style = Date.FormatStyle().weekday(.abbreviated).day().month(.abbreviated)
         if !Calendar.current.isDate(date, equalTo: now, toGranularity: .year) { style = style.year() }
         return date.formatted(style)
+    }
+}
+
+// MARK: - Stack
+
+/// `⧉ Stack of 3 · 0, −0.7, +0.7 EV` and the button that opens or folds it (`K`).
+private struct StackRow: View {
+    let library: Library
+    let frames: [MediaFile]
+
+    private var evText: String {
+        frames.map { frame -> String in
+            let bias = frame.exposure?.bias ?? 0
+            let rounded = (bias * 10).rounded() / 10
+            if rounded == 0 { return "0" }
+            return (rounded > 0 ? "+" : "\u{2212}") + String(format: "%g", abs(rounded))
+        }.joined(separator: ", ") + " EV"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.stack.fill")
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Stack of \(frames.count)")
+                    .font(.system(size: 12, weight: .medium))
+                Text(evText)
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            Spacer(minLength: 6)
+            Button(library.isCurrentStackExpanded ? "Collapse" : "Expand") { library.toggleStack() }
+                .controlSize(.small)
+                .help("Show every frame of the stack, or fold it into one (K)")
+        }
     }
 }

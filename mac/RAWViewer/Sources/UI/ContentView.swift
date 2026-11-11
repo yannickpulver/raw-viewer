@@ -40,7 +40,8 @@ struct ContentView: View {
                                           isSelected: { library.isSelected(index: $0) },
                                           selectionRevision: library.selectionRevision,
                                           selectedURLs: { library.selectedFiles.map(\.url) },
-                                          thumb: { scheduler.thumb80(for: $0) }),
+                                          thumb: { scheduler.thumb80(for: $0) },
+                                          stackSize: { library.collapsedStackSize($0) }),
                     onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
                     onVisibleRange: { library.filmstripVisibleRange($0) })
                 .frame(height: Theme.filmstripHeight)
@@ -161,7 +162,8 @@ struct ContentView: View {
                              selectionRevision: library.selectionRevision,
                              selectedURLs: { library.selectedFiles.map(\.url) },
                              thumb200: { scheduler.thumb200(for: $0) },
-                             thumb80: { scheduler.thumb80(for: $0) }),
+                             thumb80: { scheduler.thumb80(for: $0) },
+                             stackSize: { library.collapsedStackSize($0) }),
             onClick: { index, modifiers in library.click(index: index, modifiers: modifiers) },
             onActivate: { library.select(index: $0); library.toggleGrid() },
             onLayout: { columns in

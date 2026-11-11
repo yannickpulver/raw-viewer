@@ -569,6 +569,21 @@ previous day start in the grid and the single view (back from mid-day goes to
 the day's start first); in the grid a day jump scrolls the day's band to the
 top. The grid's vertical scroller is always visible (legacy style).
 
+Mac app addition: **stacks**. While Group by Scene is on (date orders only),
+multi-exposure brackets fold into one tile (`Stacks`): a frame joins the
+previous one's stack when it was shot at most 1 s later in the same subfolder
+and its EXIF exposure (shutter time and EV) differs from every frame already in
+it. Bursts at one exposure stay single frames; back-to-back brackets split
+where the exposure repeats. Exposure is read with the capture date and cached
+in `dates.json` as `[mtime, timestamp, exposureTime, exposureBias]` (older
+two-value entries are read again once). The cover is the frame closest to
+0 EV; grid and filmstrip draw a `⧉ 3` badge on it, the sidebar's Photo section
+shows `Stack of 3 · 0, −0.7, +0.7 EV` with Expand / Collapse, and `K` (View
+menu) toggles it. Rating a collapsed stack rates every frame; once expanded,
+each frame is rated alone. Lightroom, Resolve, Move Shown and the selection
+menu act on all frames of a collapsed stack. Day and scene captions and the
+Days list count frames, stacked ones included.
+
 The sidebar opens with a **Single / Grid** switch (same as `G`) and lists the
 **Days** (`Wed, 4 Nov` and the frame count, current day highlighted) whenever
 the timeline spans more than one day; a click jumps to that day.
