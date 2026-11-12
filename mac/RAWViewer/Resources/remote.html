@@ -395,7 +395,7 @@ function step(delta) {
   const index = state.index + delta;
   if (!state.shown[index]) return;
   const track = $("track");
-  track.scrollTo({ left: index * track.clientWidth, behavior: "smooth" });
+  track.scrollTo({ left: index * track.clientWidth, behavior: "instant" });
 }
 
 async function rate(value) {
