@@ -13,6 +13,7 @@ public final class AppModel {
     public static let shared = AppModel()
 
     public let library: Library
+    public let remote: RemoteRating
     let video = VideoController()
 
     /// Checks the appcast at launch and every 24h, and shows Sparkle's own dialog. Local builds
@@ -29,6 +30,7 @@ public final class AppModel {
 
     var showHelp = false
     var showStats = false
+    var showRemote = false
     /// Bumped to ask the focused canvas to rotate / toggle 2x. Spec 01 §15-16.
     var rotationToken = 0
     var compareRotationToken = 0
@@ -40,7 +42,9 @@ public final class AppModel {
 
     /// The app uses `shared`; tests pass a `Library` with temporary stores.
     init(library: Library? = nil) {
-        self.library = library ?? Library()
+        let library = library ?? Library()
+        self.library = library
+        self.remote = RemoteRating(library: library)
     }
 
     var filesLoaded: Bool { !library.files.isEmpty }
@@ -102,6 +106,7 @@ public final class AppModel {
     func escape() {
         if showHelp { showHelp = false; return }
         if showStats { showStats = false; return }
+        if showRemote { showRemote = false; return }
         if library.clearMultiSelection() { return }
         if library.displayMode == .duel { library.toggleDuel(); return }
         if library.isCompareActive { library.exitCompare(); return }

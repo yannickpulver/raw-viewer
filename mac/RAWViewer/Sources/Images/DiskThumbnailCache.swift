@@ -49,6 +49,15 @@ public final class DiskThumbnailCache: @unchecked Sendable {
         return image
     }
 
+    /// The cached JPEG's bytes as stored, for handing on without a decode.
+    public func data(_ url: URL, size: Int) -> Data? {
+        guard let mtime = mtime(of: url) else { return nil }
+        let file = directory.appendingPathComponent(filename(for: url, size: size, mtime: mtime))
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: file.path)
+        return data
+    }
+
     @discardableResult
     public func set(_ image: CGImage, for url: URL, size: Int) -> Bool {
         guard let mtime = mtime(of: url) else { return false }

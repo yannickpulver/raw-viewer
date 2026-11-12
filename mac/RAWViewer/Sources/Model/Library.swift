@@ -565,6 +565,21 @@ public final class Library {
         scheduleFolderSummarySave()
     }
 
+    /// Rates one file from outside the window (the phone), without moving. A file of the open
+    /// folder updates the window like a key press; any other file only gets its sidecar
+    /// written, through the same queue, so writes to one file never overtake each other.
+    public func setRating(_ value: Int, for file: MediaFile) {
+        let clamped = Rating.clamp(value)
+        if modeStates[.all]?.allFiles.contains(file) == true {
+            let previous = rating(for: file.url)
+            ratings[file.url] = clamped
+            updateShootStats(previous: previous, new: clamped)
+            ratingsRevision &+= 1
+            scheduleFolderSummarySave()
+        }
+        enqueueWrite(url: file.url, rating: clamped, kind: file.kind)
+    }
+
     private func enqueueWrite(url: URL, rating value: Int, kind: MediaKind) {
         let writer = ratingWriter
         let previous = writeChain
@@ -1225,6 +1240,12 @@ public final class Library {
         summarySaveTask?.cancel()
         summarySaveTask = nil
         guard let folder, let summary = currentFolderSummary() else { return }
+        summaryStore.save(summary, for: folder)
+        summaryCache?[folder.standardizedFileURL.path] = summary
+    }
+
+    /// Stores the summary of a folder that is not open, worked out elsewhere (the phone).
+    public func saveFolderSummary(_ summary: FolderSummary, for folder: URL) {
         summaryStore.save(summary, for: folder)
         summaryCache?[folder.standardizedFileURL.path] = summary
     }

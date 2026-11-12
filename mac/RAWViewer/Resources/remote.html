@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<title>RAW Viewer</title>
+<style>
+  :root {
+    --bg: #000; --panel: #1c1c1e; --line: #2c2c2e; --text: #ddd; --dim: #8e8e93;
+    --amber: #ffb400; --star: #ffc832; --red: #e64646;
+    --top: env(safe-area-inset-top); --bottom: env(safe-area-inset-bottom);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+  body { overscroll-behavior: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  header { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
+    padding: calc(var(--top) + 10px) 16px 10px; background: rgba(0,0,0,.85);
+    -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); border-bottom: 1px solid var(--line); }
+  header h1 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .back { font-size: 26px; line-height: 1; width: 32px; height: 32px; margin-left: -6px; }
+  .count { color: var(--dim); font-size: 13px; font-variant-numeric: tabular-nums; }
+
+  /* Folders */
+  .folders { list-style: none; margin: 0; padding: 12px 16px calc(var(--bottom) + 16px); }
+  .folders li { margin-bottom: 10px; }
+  .folders button { width: 100%; text-align: left; padding: 14px 16px; border-radius: 12px; background: var(--panel); }
+  .folders .name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .folders .meta { color: var(--dim); font-size: 13px; margin-top: 2px; }
+  .badge { font-size: 11px; font-weight: 600; color: #000; background: var(--amber); border-radius: 99px; padding: 1px 7px; }
+
+  /* Filters */
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 10px 16px 0; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chips button { flex: none; padding: 5px 11px; border-radius: 99px; background: var(--panel);
+    font-size: 13px; font-variant-numeric: tabular-nums; }
+  .chips button.on { background: var(--text); color: #000; font-weight: 600; }
+
+  /* Grid */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; padding: 10px 0 calc(var(--bottom) + 16px); }
+  .tile { position: relative; aspect-ratio: 1; background: #111; overflow: hidden; }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .tile .r { position: absolute; left: 4px; bottom: 4px; font-size: 11px; font-weight: 700; padding: 1px 5px;
+    border-radius: 4px; background: rgba(0,0,0,.65); color: var(--star); }
+  .tile .r.x { color: var(--red); }
+  .tile.rejected img { opacity: .35; }
+  .empty, .status { color: var(--dim); text-align: center; padding: 48px 24px; }
+
+  /* Viewer */
+  .viewer { position: fixed; inset: 0; z-index: 10; background: #000; display: flex; flex-direction: column; }
+  .viewer .bar { display: flex; align-items: center; gap: 8px; padding: calc(var(--top) + 8px) 16px 8px; }
+  .viewer .bar .name { flex: 1; text-align: center; font-size: 13px; color: var(--dim); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .track { flex: 1; display: flex; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory;
+    scrollbar-width: none; overscroll-behavior: contain; }
+  .track::-webkit-scrollbar { display: none; }
+  .slide { flex: none; width: 100%; height: 100%; scroll-snap-align: center; scroll-snap-stop: always;
+    display: flex; align-items: center; justify-content: center; position: relative; }
+  .slide img { max-width: 100%; max-height: 100%; object-fit: contain; display: block; }
+  .slide .kind { position: absolute; top: 8px; right: 12px; font-size: 11px; color: var(--dim); }
+  .rate { display: flex; justify-content: center; align-items: center; gap: 4px;
+    padding: 10px 12px calc(var(--bottom) + 14px); }
+  .rate button { width: 48px; height: 48px; border-radius: 12px; font-size: 26px; color: #555; }
+  .rate button.on { color: var(--star); }
+  .rate .reject { font-size: 22px; font-weight: 700; margin-right: 10px; }
+  .rate .reject.on { color: #fff; background: var(--red); }
+  .toast { position: fixed; left: 50%; bottom: calc(var(--bottom) + 90px); transform: translateX(-50%); z-index: 20;
+    background: var(--panel); padding: 8px 14px; border-radius: 99px; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<section id="folders">
+  <header><h1>RAW Viewer</h1></header>
+  <ul class="folders" id="folderList"></ul>
+  <p class="status" id="folderStatus">Loading…</p>
+</section>
+
+<section id="folder" hidden>
+  <header>
+    <button class="back" id="folderBack" aria-label="Folders">‹</button>
+    <h1 id="folderName"></h1>
+    <span class="count" id="folderCount"></span>
+  </header>
+  <div class="chips" id="kinds"></div>
+  <div class="chips" id="filters"></div>
+  <p class="status" id="fileStatus" hidden></p>
+  <div class="grid" id="grid"></div>
+</section>
+
+<section class="viewer" id="viewer" hidden>
+  <div class="bar">
+    <button class="back" id="viewerBack" aria-label="Grid">‹</button>
+    <span class="name" id="viewerName"></span>
+    <span class="count" id="viewerCount"></span>
+  </div>
+  <div class="track" id="track"></div>
+  <div class="rate" id="rate">
+    <button class="reject" data-r="-1" aria-label="Reject">✕</button>
+    <button data-r="1" aria-label="1 star">★</button>
+    <button data-r="2" aria-label="2 stars">★</button>
+    <button data-r="3" aria-label="3 stars">★</button>
+    <button data-r="4" aria-label="4 stars">★</button>
+    <button data-r="5" aria-label="5 stars">★</button>
+  </div>
+</section>
+
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const KINDS = [["raw", "RAW"], ["jpeg", "JPG"], ["video", "MOV"], ["all", "All"]];
+const FILTERS = [["all", "All"], ["unrated", "Unrated"], ["1", "1★+"], ["2", "2★+"], ["3", "3★+"],
+                 ["4", "4★+"], ["5", "5★"], ["rejected", "✕"]];
+
+const state = {
+  folder: null,      // { id, name, open, files: [] }
+  kind: "raw",
+  filter: "all",
+  shown: [],         // files after kind + filter, frozen while the viewer is open
+  index: 0,
+};
+
+function remember(key, value) { try { localStorage.setItem(key, value); } catch {} }
+function recall(key, fallback) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
+state.filter = recall("filter", "all");
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (!response.ok) throw new Error(await response.text() || response.statusText);
+  return response.json();
+}
+const q = (params) => new URLSearchParams(params).toString();
+const thumbURL = (f) => `/api/thumb?${q({ folder: state.folder.id, file: f.id })}`;
+const previewURL = (f) => `/api/preview?${q({ folder: state.folder.id, file: f.id })}`;
+
+function toast(text) {
+  const el = $("toast");
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (el.hidden = true), 2500);
+}
+
+// MARK: Routing — #f=<folder id>&i=<file id>
+
+function go(params, replace) {
+  const hash = params ? "#" + q(params) : "#";
+  // A new hash routes through `hashchange`; the same one would not fire it.
+  if (!replace && hash !== (location.hash || "#")) { location.hash = hash; return; }
+  history.replaceState(null, "", hash);
+  route();
+}
+
+async function route() {
+  const params = new URLSearchParams(location.hash.slice(1));
+  const folderID = params.get("f");
+  const fileID = params.get("i");
+  if (!folderID) { showFolders(); return; }
+  if (!state.folder || state.folder.id !== folderID) await loadFolder(folderID);
+  if (!state.folder) return;
+  if (fileID) openViewer(fileID); else closeViewer();
+}
+window.addEventListener("hashchange", route);
+
+// MARK: Folders
+
+async function showFolders() {
+  $("viewer").hidden = true;
+  $("folder").hidden = true;
+  $("folders").hidden = false;
+  try {
+    const folders = await api("/api/folders");
+    const list = $("folderList");
+    list.innerHTML = "";
+    $("folderStatus").hidden = folders.length > 0;
+    $("folderStatus").textContent = "No recent folders. Open one on the Mac first.";
+    for (const folder of folders) {
+      const li = document.createElement("li");
+      const meta = folder.total == null ? "Not read yet"
+        : `${folder.total} files · ${folder.rated} rated`;
+      li.innerHTML = `<button><div class="name"></div><div class="meta"></div></button>`;
+      li.querySelector(".name").textContent = folder.name;
+      if (folder.open) li.querySelector(".name").insertAdjacentHTML("beforeend", `<span class="badge">Open on Mac</span>`);
+      li.querySelector(".meta").textContent = meta;
+      li.querySelector("button").onclick = () => go({ f: folder.id });
+      list.append(li);
+    }
+  } catch (error) {
+    $("folderStatus").hidden = false;
+    $("folderStatus").textContent = "The Mac does not answer. " + error.message;
+  }
+}
+
+// MARK: Folder
+
+async function loadFolder(id) {
+  $("folders").hidden = true;
+  $("folder").hidden = false;
+  $("folderName").textContent = "";
+  $("folderCount").textContent = "";
+  $("grid").innerHTML = "";
+  $("kinds").innerHTML = "";
+  $("filters").innerHTML = "";
+  setFileStatus("Reading folder…");
+  try {
+    const list = await api(`/api/files?${q({ folder: id })}`);
+    state.folder = { id, name: list.name, open: list.open, files: list.files };
+    const kinds = new Set(list.files.map((f) => f.kind));
+    // Like the Mac: RAW first, otherwise whichever of JPEG / video has more.
+    const count = (k) => list.files.filter((f) => f.kind === k).length;
+    state.kind = kinds.has("raw") ? "raw" : count("video") > count("jpeg") ? "video" : "jpeg";
+    renderFolder();
+  } catch (error) {
+    state.folder = null;
+    setFileStatus("Could not read the folder. " + error.message);
+  }
+}
+
+function setFileStatus(text) {
+  $("fileStatus").hidden = !text;
+  $("fileStatus").textContent = text || "";
+}
+
+function matches(file) {
+  if (state.kind !== "all" && file.kind !== state.kind) return false;
+  switch (state.filter) {
+    case "all": return true;
+    case "unrated": return file.rating === 0;
+    case "rejected": return file.rating === -1;
+    default: return file.rating >= Number(state.filter);
+  }
+}
+
+function chips(container, items, current, counts, onPick) {
+  container.innerHTML = "";
+  for (const [value, label] of items) {
+    if (counts && counts[value] === 0) continue;
+    const button = document.createElement("button");
+    button.textContent = counts ? `${label} ${counts[value]}` : label;
+    button.className = value === current ? "on" : "";
+    button.onclick = () => onPick(value);
+    container.append(button);
+  }
+}
+
+function renderFolder() {
+  const files = state.folder.files;
+  $("folderName").textContent = state.folder.name;
+  const kindCounts = { all: files.length };
+  for (const [k] of KINDS) if (k !== "all") kindCounts[k] = files.filter((f) => f.kind === k).length;
+  const kindsShown = KINDS.filter(([k]) => k === "all" || kindCounts[k] > 0);
+  chips($("kinds"), kindsShown.length > 2 ? kindsShown : [], state.kind, kindCounts, (k) => {
+    state.kind = k; renderFolder();
+  });
+  chips($("filters"), FILTERS, state.filter, null, (f) => {
+    state.filter = f; remember("filter", f); renderFolder();
+  });
+
+  state.shown = files.filter(matches);
+  $("folderCount").textContent = `${state.shown.length}`;
+  setFileStatus(state.shown.length ? "" : "No files match this filter.");
+  const grid = $("grid");
+  grid.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+  state.shown.forEach((file, index) => {
+    const tile = document.createElement("button");
+    tile.className = "tile";
+    tile.dataset.id = file.id;
+    const img = document.createElement("img");
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.alt = file.name;
+    img.src = thumbURL(file);
+    tile.append(img);
+    tile.append(Object.assign(document.createElement("span"), { className: "r" }));
+    tile.onclick = () => go({ f: state.folder.id, i: file.id });
+    paintTile(tile, file);
+    fragment.append(tile);
+  });
+  grid.append(fragment);
+}
+
+function paintTile(tile, file) {
+  const badge = tile.querySelector(".r");
+  badge.hidden = file.rating === 0;
+  badge.className = file.rating === -1 ? "r x" : "r";
+  badge.textContent = file.rating === -1 ? "✕" : "★".repeat(Math.max(file.rating, 0));
+  tile.classList.toggle("rejected", file.rating === -1);
+}
+
+// MARK: Viewer
+
+function openViewer(fileID) {
+  let index = state.shown.findIndex((f) => f.id === fileID);
+  if (index < 0) {
+    // Opened from a link or after a filter change: show it among all files of its kind.
+    state.shown = state.folder.files.filter((f) => state.kind === "all" || f.kind === state.kind);
+    index = Math.max(0, state.shown.findIndex((f) => f.id === fileID));
+  }
+  const viewer = $("viewer");
+  const track = $("track");
+  if (viewer.hidden || track.childElementCount !== state.shown.length) {
+    track.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+    for (const file of state.shown) {
+      const slide = document.createElement("div");
+      slide.className = "slide";
+      if (file.kind === "video") slide.innerHTML = `<span class="kind">Video</span>`;
+      fragment.append(slide);
+    }
+    track.append(fragment);
+    viewer.hidden = false;
+    document.body.style.overflow = "hidden";
+  }
+  if (state.index !== index || track.scrollLeft !== index * track.clientWidth) {
+    state.index = index;
+    track.scrollTo({ left: index * track.clientWidth, behavior: "instant" });
+  }
+  showCurrent();
+}
+
+function closeViewer() {
+  if ($("viewer").hidden) return;
+  $("viewer").hidden = true;
+  document.body.style.overflow = "";
+  // Ratings changed while the viewer was open; the grid applies the filter again.
+  renderFolder();
+  const tile = $("grid").querySelector(`[data-id="${CSS.escape(state.shown[state.index]?.id ?? "")}"]`);
+  tile?.scrollIntoView({ block: "center" });
+}
+
+function showCurrent() {
+  const file = state.shown[state.index];
+  if (!file) return;
+  $("viewerName").textContent = file.name;
+  $("viewerCount").textContent = `${state.index + 1} / ${state.shown.length}`;
+  paintStars(file.rating);
+  // Previews for the current file and two either side; the rest stay empty.
+  const slides = $("track").children;
+  for (let i = 0; i < slides.length; i++) {
+    const near = Math.abs(i - state.index) <= 2;
+    const img = slides[i].querySelector("img");
+    if (near && !img) {
+      const image = document.createElement("img");
+      image.decoding = "async";
+      image.src = thumbURL(state.shown[i]);
+      const full = new Image();
+      full.onload = () => (image.src = full.src);
+      full.src = previewURL(state.shown[i]);
+      slides[i].prepend(image);
+    } else if (!near && img) {
+      img.remove();
+    }
+  }
+}
+
+function paintStars(rating) {
+  for (const button of $("rate").children) {
+    const value = Number(button.dataset.r);
+    button.classList.toggle("on", value === -1 ? rating === -1 : rating >= value);
+  }
+}
+
+let scrollFrame;
+$("track").addEventListener("scroll", () => {
+  cancelAnimationFrame(scrollFrame);
+  scrollFrame = requestAnimationFrame(() => {
+    const track = $("track");
+    const index = Math.round(track.scrollLeft / track.clientWidth);
+    if (index !== state.index && state.shown[index]) {
+      state.index = index;
+      history.replaceState(null, "", "#" + q({ f: state.folder.id, i: state.shown[index].id }));
+      showCurrent();
+    }
+  });
+});
+
+function step(delta) {
+  const index = state.index + delta;
+  if (!state.shown[index]) return;
+  const track = $("track");
+  track.scrollTo({ left: index * track.clientWidth, behavior: "smooth" });
+}
+
+async function rate(value) {
+  const file = state.shown[state.index];
+  if (!file) return;
+  // Tapping the current rating again clears it, like X on the Mac.
+  const next = file.rating === value ? 0 : value;
+  const previous = file.rating;
+  file.rating = next;
+  paintStars(next);
+  if (next !== 0 && state.index < state.shown.length - 1) setTimeout(() => step(1), 180);
+  try {
+    await api("/api/rate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder: state.folder.id, file: file.id, rating: next }),
+    });
+  } catch (error) {
+    file.rating = previous;
+    if (state.shown[state.index] === file) paintStars(previous);
+    toast("Rating not saved: " + error.message);
+  }
+}
+
+$("rate").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button) rate(Number(button.dataset.r));
+});
+$("folderBack").onclick = () => go(null);
+$("viewerBack").onclick = () => go({ f: state.folder.id });
+
+document.addEventListener("keydown", (event) => {
+  if ($("viewer").hidden) return;
+  if (event.key === "ArrowRight") step(1);
+  else if (event.key === "ArrowLeft") step(-1);
+  else if (event.key === "Escape") go({ f: state.folder.id });
+  else if (/^[0-5]$/.test(event.key)) rate(Number(event.key));
+  else if (event.key === "x") rate(-1);
+});
+
+// Ratings made on the Mac in the meantime show up when the phone comes back.
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !state.folder) return;
+  try {
+    const list = await api(`/api/files?${q({ folder: state.folder.id })}`);
+    const fresh = new Map(list.files.map((f) => [f.id, f.rating]));
+    for (const file of state.folder.files) if (fresh.has(file.id)) file.rating = fresh.get(file.id);
+    if ($("viewer").hidden) renderFolder(); else paintStars(state.shown[state.index]?.rating ?? 0);
+  } catch {}
+});
+
+window.addEventListener("resize", () => {
+  if (!$("viewer").hidden) $("track").scrollTo({ left: state.index * $("track").clientWidth, behavior: "instant" });
+});
+
+route();
+</script>
+</body>
+</html>

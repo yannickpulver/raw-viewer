@@ -59,6 +59,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DiskThumbnailCache.shared.enforceSizeCap()
         }
 
+        model.remote.startIfEnabled()
+
         // A folder path as the first CLI argument opens exactly like the UI would.
         let arguments = CommandLine.arguments.dropFirst().filter { !$0.hasPrefix("-") }
         if let path = arguments.first {

@@ -164,6 +164,56 @@ private struct OverlayPanel<Content: View>: View {
     }
 }
 
+/// Rating on the phone: the switch, the address and a QR code to open it.
+struct RemoteOverlay: View {
+    let remote: RemoteRating
+    let onClose: () -> Void
+
+    var body: some View {
+        OverlayPanel(title: "Rate on Phone", onClose: onClose) {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Serve over Tailscale", isOn: Binding(get: { remote.isEnabled },
+                                                            set: { remote.setEnabled($0) }))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .foregroundStyle(Theme.panelText)
+                switch remote.status {
+                case .off:
+                    note("Open the page on any device in your tailnet and rate the recent folders there.")
+                case .starting:
+                    note("Starting…")
+                case .failed(let reason):
+                    note(reason)
+                    Button("Try Again") { remote.setEnabled(true) }
+                        .controlSize(.small)
+                case .running(let url):
+                    if let qr = QRCode.image(for: url.absoluteString) {
+                        Image(decorative: qr, scale: 1)
+                            .interpolation(.none)
+                            .resizable()
+                            .frame(width: 180, height: 180)
+                            .padding(10)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    Text(url.absoluteString)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(Theme.panelText)
+                        .textSelection(.enabled)
+                    note("The Mac stays awake while this is on.")
+                }
+            }
+            .frame(width: 220, alignment: .leading)
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(Theme.dimText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 struct HelpOverlay: View {
     let onClose: () -> Void
 

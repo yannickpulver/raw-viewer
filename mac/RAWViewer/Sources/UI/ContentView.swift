@@ -211,6 +211,9 @@ struct ContentView: View {
             if model.showHelp {
                 HelpOverlay { model.showHelp = false }
             }
+            if model.showRemote {
+                RemoteOverlay(remote: model.remote) { model.showRemote = false }
+            }
         }
     }
 
