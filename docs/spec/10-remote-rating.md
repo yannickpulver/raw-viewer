@@ -21,7 +21,7 @@ phone (Safari) ──tailnet──▶ http://<Mac's 100.x address>:8765 ──�
   window; file and rating counts come from the folder summary.
 - A folder: a grid of 400 px thumbnails, RAW / JPG / MOV / All chips (RAW first, as on the Mac)
   and a rating filter (All, Unrated, 1★+ … 5★, Rejected).
-- Tapping a tile opens a full-screen viewer with 2048 px previews. Swipe to move, tap ✕ or a
+- Tapping a tile opens a full-screen viewer with 2048 px previews. Swipe or tap the left or right third to move, tap ✕ or a
   star to rate. A rating advances to the next file; tapping the current rating clears it.
 - Ratings made on the Mac show up when the page comes back to the foreground.
 
