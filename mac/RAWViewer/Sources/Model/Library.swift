@@ -673,6 +673,16 @@ public final class Library {
         afterFilterChange()
     }
 
+    /// The sidebar's rating rows, in display order: all, unrated, 1+ … 5, rejected.
+    public static let ratingFilterValues = [0, RatingFilter.unratedValue, 1, 2, 3, 4, 5, -1]
+
+    /// Files per rating filter value in the current mode, folder and unviewed filter. Ratings
+    /// are all read right after the scan, so these are complete once that sweep has run.
+    public var ratingCounts: [Int: Int] {
+        _ = ratingsRevision
+        return state.ratingCounts(values: Self.ratingFilterValues, ratings: ratings, viewedBefore: viewedBefore)
+    }
+
     /// Files of the current mode no past session showed large.
     public var unviewedCount: Int {
         allFiles.reduce(0) { $0 + (viewedBefore.contains(ViewedStore.key($1.url)) ? 0 : 1) }

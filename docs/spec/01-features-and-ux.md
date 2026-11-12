@@ -172,16 +172,29 @@ replaces the mode switcher, the subfolder chips, the position counter, the info 
 face crops and the bottom-right filter toolbar. It is a floating panel (rounded, inset 8 pt
 from the window edges, reaching up into the toolbar row) beside the image area, so the
 image ends to its left; the filmstrip keeps the full window width below it. While it is
-open, the toolbar's sidebar toggle drops its glass and sits in the panel's top-right corner. Three sections:
+open, the toolbar's sidebar toggle drops its glass and sits in the panel's top-right corner.
 
+Mac app change (0.5.14): the photo comes first, and the sections change with the view.
+Top to bottom, below the Single / Grid switch:
+
+- **Photo** (title in the toolbar row): in single view and the duel, position text, file
+  name, capture date, a luminance histogram, four tiles (shutter, aperture, ISO, focal
+  length), camera · lens, the stack row and the stars. In the grid it shrinks to
+  `43/56 XT5Y7322.RAF`, one line `1/500 · f/8 · ISO 125 · 23 mm` and the stars. Five
+  clickable stars (a click on the current star clears it; like the keys, a click
+  auto-advances) and a reject toggle, disabled during a duel. Exposure values, camera and
+  lens are read from EXIF when the photo comes on screen; the histogram is counted from
+  the decoded preview (the camera's embedded JPEG for RAW files). Videos show neither.
+- **Faces**: the face crops, four per row, while faces show (single view only).
 - **Filter**: file kind (only with more than one kind; each segment shows its count
-  underneath), subfolders as a list (`All` first,
-  right-click excludes), the rating filter (8 segments as below), the sort order and
-  Group by Scene. Its title shares the toolbar row with the sidebar toggle.
-- **Photo**: position text, file name, capture date, five clickable stars (a click on the
-  current star clears it; like the keys, a click auto-advances) and a reject toggle.
-  Disabled during a duel.
-- **Faces**: the face crops, four per row, while faces show (single view).
+  underneath), subfolders as a list (`All` first, right-click excludes), the rating
+  filter and Unviewed Only. Single view: 8 rating segments as below and a checkbox. Grid:
+  the ratings as a list (`All`, `Unrated`, `1★ and up` … `5★`, `Rejected`), each row with
+  its count and a faint bar for its share, and an `Unviewed only` row with its count.
+  Counts apply the kind, folder and unviewed filters but not the rating filter.
+- **Order**: Oldest first / Newest first (plus Best faces with face detection) as
+  segments, Group by Scene underneath.
+- **Days**: see below.
 
 The toolbar keeps Back (leading) and the sidebar toggle (trailing). While the sidebar is
 closed, an active rating filter shows as an amber badge (`≥3★ · 42/137`) next to the
