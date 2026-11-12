@@ -30,7 +30,6 @@ public final class AppModel {
 
     var showHelp = false
     var showStats = false
-    var showRemote = false
     /// Bumped to ask the focused canvas to rotate / toggle 2x. Spec 01 §15-16.
     var rotationToken = 0
     var compareRotationToken = 0
@@ -106,7 +105,6 @@ public final class AppModel {
     func escape() {
         if showHelp { showHelp = false; return }
         if showStats { showStats = false; return }
-        if showRemote { showRemote = false; return }
         if library.clearMultiSelection() { return }
         if library.displayMode == .duel { library.toggleDuel(); return }
         if library.isCompareActive { library.exitCompare(); return }

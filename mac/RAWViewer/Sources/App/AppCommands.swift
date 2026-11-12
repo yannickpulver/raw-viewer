@@ -42,7 +42,7 @@ struct AppCommands: Commands {
             Button("Close Folder") { library.closeFolder() }
             Divider()
             // Mac app addition: no Python-app equivalent.
-            Button("Rate on Phone…") { model.showRemote.toggle() }
+            SettingsLink { Text("Rate on Phone…") }
             Divider()
             Button(Self.title("Reveal in Finder", "O")) { library.revealInFinder() }
                 .disabled(!model.filesLoaded)

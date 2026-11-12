@@ -17,11 +17,16 @@ struct RAWViewerApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1400, height: 900)
         .commands { AppCommands(model: model) }
+
+        Settings {
+            SettingsView(remote: model.remote)
+        }
     }
 }
 
 /// Black full-bleed window with a remembered frame. Spec 01 §1.
 private struct WindowConfigurator: NSViewRepresentable {
+    static let autosaveName = "RAWViewerMainWindow"
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
@@ -33,7 +38,7 @@ private struct WindowConfigurator: NSViewRepresentable {
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.appearance = NSAppearance(named: .darkAqua)
-            window.setFrameAutosaveName("RAWViewerMainWindow")
+            window.setFrameAutosaveName(Self.autosaveName)
         }
         return view
     }
@@ -51,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             guard NSApp.modalWindow == nil, NSApp.keyWindow != nil else { return event }
+            // Only the main window takes the culling keys; Settings keeps its own.
+            guard event.window?.frameAutosaveName == WindowConfigurator.autosaveName else { return event }
             return MainActor.assumeIsolated { self.model.handleKey(event) ? nil : event }
         }
 

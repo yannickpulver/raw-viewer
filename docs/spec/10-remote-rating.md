@@ -9,8 +9,10 @@ phone (Safari) ──tailnet──▶ http://<Mac's 100.x address>:8765 ──�
 
 ## Mac side
 
-- **File → Rate on Phone…** opens a panel: a switch, the address and a QR code. The switch is
-  remembered (`remoteRating` in the user defaults) and the server starts at launch when on.
+- **Settings (⌘,) → Rate on Phone**: a switch, the address with a copy button and a QR code.
+  **File → Rate on Phone…** opens the same window. The switch is remembered (`remoteRating` in
+  the user defaults) and the server starts at launch when on.
+- Keys typed while Settings is the key window stay there; only the main window rates and moves.
 - The server listens on the Mac's Tailscale IPv4 only (100.64.0.0/10 on a `utun` interface), so
   devices outside the tailnet cannot reach it. Without Tailscale the panel says so.
 - While it runs the Mac does not idle-sleep.

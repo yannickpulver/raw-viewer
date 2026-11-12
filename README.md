@@ -30,7 +30,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Reopening a folder continues at the photo where you left off
 - Unviewed only: show just the frames no earlier session opened; what you view now stays in the list
 - Duel: two frames of a scene side by side with shared zoom; keep one or both until the scene's best get 2★ (`Cmd+1`, then `V`)
-- Rate on your phone: the app serves a page over [Tailscale](https://tailscale.com); open it on any device in your tailnet, pick a recent folder and swipe through it (File → Rate on Phone…)
+- Rate on your phone: the app serves a page over [Tailscale](https://tailscale.com); open it on any device in your tailnet, pick a recent folder and swipe through it (Settings → Rate on Phone)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
 
