@@ -17,6 +17,7 @@ public final class Preferences {
             Keys.showFaces: true,
             Keys.faceDetection: false,
             Keys.groupScenes: false,
+            Keys.remoteRating: false,
         ])
     }
 
@@ -31,6 +32,7 @@ public final class Preferences {
         public static let showFaces = "showFaces"
         public static let faceDetection = "faceDetection"
         public static let groupScenes = "groupScenes"
+        public static let remoteRating = "remoteRating"
     }
 
     /// Stored under the old info-overlay key, so the overlay's on/off carries over.
@@ -72,5 +74,11 @@ public final class Preferences {
     public var groupScenes: Bool {
         get { defaults.bool(forKey: Keys.groupScenes) }
         set { defaults.set(newValue, forKey: Keys.groupScenes) }
+    }
+
+    /// Serve the phone page over Tailscale.
+    public var remoteRating: Bool {
+        get { defaults.bool(forKey: Keys.remoteRating) }
+        set { defaults.set(newValue, forKey: Keys.remoteRating) }
     }
 }

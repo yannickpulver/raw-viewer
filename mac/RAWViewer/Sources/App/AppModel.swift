@@ -13,6 +13,7 @@ public final class AppModel {
     public static let shared = AppModel()
 
     public let library: Library
+    public let remote: RemoteRating
     let video = VideoController()
 
     /// Checks the appcast at launch and every 24h, and shows Sparkle's own dialog. Local builds
@@ -40,7 +41,9 @@ public final class AppModel {
 
     /// The app uses `shared`; tests pass a `Library` with temporary stores.
     init(library: Library? = nil) {
-        self.library = library ?? Library()
+        let library = library ?? Library()
+        self.library = library
+        self.remote = RemoteRating(library: library)
     }
 
     var filesLoaded: Bool { !library.files.isEmpty }

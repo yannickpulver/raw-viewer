@@ -52,6 +52,7 @@ during the rewrite; decide deliberately.
 | `07-persistence-and-settings.md` | Everything written to disk: exact paths, formats, defaults, what is *not* persisted. |
 | `08-build-and-distribution.md` | Version scheme, bundle identity, signing, notarization, Homebrew cask, release flow. |
 | `09-architecture-notes.md` | Module map, threading, signal flow, known pitfalls, tech debt, suggested Swift mapping. |
+| `10-remote-rating.md` | Mac app addition: rating from the phone over Tailscale. |
 
 ## Behaviour the rewrite must reproduce vs implementation details it may replace
 

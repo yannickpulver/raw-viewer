@@ -41,6 +41,9 @@ struct AppCommands: Commands {
             Divider()
             Button("Close Folder") { library.closeFolder() }
             Divider()
+            // Mac app addition: no Python-app equivalent.
+            SettingsLink { Text("Rate on Phone…") }
+            Divider()
             Button(Self.title("Reveal in Finder", "O")) { library.revealInFinder() }
                 .disabled(!model.filesLoaded)
             Button("Open All in Lightroom") { library.openInLightroom() }
