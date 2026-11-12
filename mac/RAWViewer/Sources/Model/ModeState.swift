@@ -105,11 +105,7 @@ public struct ModeState: Sendable {
                                       viewedBefore: Set<String> = []) {
         let previous = currentFile
         files = allFiles.filter { file in
-            let rating = ratings[file.url] ?? 0
-            guard ratingFilter.matches(rating: rating) else { return false }
-            if unviewedOnly, viewedBefore.contains(ViewedStore.key(file.url)) { return false }
-            if let folderFilter { return file.subfolder == folderFilter }
-            return !excludedFolders.contains(file.subfolder)
+            ratingFilter.matches(rating: ratings[file.url] ?? 0) && passesOtherFilters(file, viewedBefore: viewedBefore)
         }
         switch sortOrder {
         case .oldestFirst:
@@ -135,6 +131,29 @@ public struct ModeState: Sendable {
             index = 0
         }
         pruneSelection()
+    }
+
+    /// Every filter except the rating filter: unviewed, then subfolder.
+    private func passesOtherFilters(_ file: MediaFile, viewedBefore: Set<String>) -> Bool {
+        if unviewedOnly, viewedBefore.contains(ViewedStore.key(file.url)) { return false }
+        if let folderFilter { return file.subfolder == folderFilter }
+        return !excludedFolders.contains(file.subfolder)
+    }
+
+    /// How many files each rating filter value would keep, with the other filters as they
+    /// are: the counts next to the sidebar's rating list. Counts frames, so a collapsed stack
+    /// counts every frame. Keyed by `RatingFilter.value`.
+    public func ratingCounts(values: [Int], ratings: [URL: Int], viewedBefore: Set<String> = []) -> [Int: Int] {
+        var perRating: [Int: Int] = [:]
+        for file in allFiles where passesOtherFilters(file, viewedBefore: viewedBefore) {
+            perRating[ratings[file.url] ?? 0, default: 0] += 1
+        }
+        var counts: [Int: Int] = [:]
+        for value in values {
+            let filter = RatingFilter(value)
+            counts[value] = perRating.reduce(0) { $0 + (filter.matches(rating: $1.key) ? $1.value : 0) }
+        }
+        return counts
     }
 
     /// Finds the stacks (only while scenes are grouped, in the date orders) and leaves each

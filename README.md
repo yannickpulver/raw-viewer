@@ -18,7 +18,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Fast preview using embedded JPEGs
 - Star ratings (0-5) saved to XMP sidecar files
 - Filmstrip navigation
-- Sidebar (`I`) with the photo info, clickable stars, filters, sort order and faces
+- Sidebar (`I`) with the photo info (histogram, exposure, camera and lens), clickable stars, faces, filters with rating counts and sort order
 - Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
 - Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers in the sidebar, click a face to zoom in
