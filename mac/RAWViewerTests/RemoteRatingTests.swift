@@ -17,6 +17,13 @@ final class HTTPParserTests: XCTestCase {
         XCTAssertEqual(consumed, raw.utf8.count)
     }
 
+    /// Browsers' `URLSearchParams` write a space as `+` and a real plus as `%2B`.
+    func testPlusInQueryIsASpace() {
+        let raw = "GET /api/files?folder=%2FShoot+-+Bern+Walk%2B1 HTTP/1.1\r\n\r\n"
+        guard case .request(let request, _) = parse(raw) else { return XCTFail() }
+        XCTAssertEqual(request.query["folder"], "/Shoot - Bern Walk+1")
+    }
+
     func testWaitsForHeadersAndBody() {
         XCTAssertEqual(parse("GET / HTTP/1.1\r\nHost: x\r\n"), .incomplete)
         XCTAssertEqual(parse("POST /api/rate HTTP/1.1\r\nContent-Length: 5\r\n\r\nab"), .incomplete)
@@ -105,9 +112,15 @@ final class RemoteRatingTests: XCTestCase {
     }
 
     private func get(_ path: String, _ query: [String: String] = [:]) async throws -> (Data, HTTPURLResponse) {
-        var components = URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)!
-        if !query.isEmpty { components.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) } }
-        let (data, response) = try await URLSession.shared.data(from: components.url!)
+        // Encoded the way the page's `URLSearchParams` does it: spaces become `+`.
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~ ")
+        let encoded = query.map { key, value in
+            let v = value.addingPercentEncoding(withAllowedCharacters: allowed)!.replacingOccurrences(of: " ", with: "+")
+            return "\(key)=\(v)"
+        }.joined(separator: "&")
+        let url = URL(string: base.appendingPathComponent(path).absoluteString + (query.isEmpty ? "" : "?" + encoded))!
+        let (data, response) = try await URLSession.shared.data(from: url)
         return (data, response as! HTTPURLResponse)
     }
 

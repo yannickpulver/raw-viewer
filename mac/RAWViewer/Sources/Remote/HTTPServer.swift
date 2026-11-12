@@ -105,8 +105,15 @@ enum HTTPParser {
         guard bodyStart - buffer.startIndex + length <= maximumSize else { return .tooLarge }
         guard buffer.endIndex - bodyStart >= length else { return .incomplete }
 
+        // Form encoding, as `URLSearchParams` writes it: `+` is a space.
         var query: [String: String] = [:]
-        for item in components.queryItems ?? [] { query[item.name] = item.value ?? "" }
+        for item in components.percentEncodedQueryItems ?? [] {
+            func decode(_ text: String) -> String {
+                let spaced = text.replacingOccurrences(of: "+", with: " ")
+                return spaced.removingPercentEncoding ?? spaced
+            }
+            query[decode(item.name)] = decode(item.value ?? "")
+        }
         let request = HTTPRequest(method: String(requestLine[0]).uppercased(),
                                   path: components.path,
                                   query: query,
