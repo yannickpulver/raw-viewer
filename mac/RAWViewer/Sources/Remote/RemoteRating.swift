@@ -146,14 +146,19 @@ public final class RemoteRating {
         let rated: Int?
     }
 
-    /// The recent folders, plus the open one should it be missing there.
+    /// The open folder, the recent folders, then every other folder this app has opened,
+    /// newest first. Folders that are gone or on an unmounted drive are left out.
     private var folders: [URL] {
-        var result = library.recentFolders
-        if let open = library.folder, library.hasLoadedFolder,
-           !result.contains(where: { Self.id($0) == Self.id(open) }) {
-            result.insert(open, at: 0)
+        var candidates = library.recentFolders
+        if let open = library.folder, library.hasLoadedFolder { candidates.insert(open, at: 0) }
+        candidates += library.summarizedFolders()
+        var seen = Set<String>()
+        return candidates.filter { folder in
+            var isDirectory: ObjCBool = false
+            guard seen.insert(Self.id(folder)).inserted,
+                  FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory) else { return false }
+            return isDirectory.boolValue
         }
-        return result
     }
 
     private func folderList() -> [FolderInfo] {
