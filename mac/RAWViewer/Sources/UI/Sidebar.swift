@@ -23,7 +23,6 @@ struct Sidebar: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                DisplaySwitch(library: library)
                 if let file = library.currentFile {
                     SidebarSection(title: titleInToolbarRow ? nil : Self.photoTitle, symbol: Self.photoSymbol) {
                         PhotoCard(library: library, file: file, style: isGrid ? .compact : .full)
@@ -49,7 +48,27 @@ struct Sidebar: View {
             // Every control here shares the width it is given (`Segments`, lists, truncating
             // text), so the column follows the panel, a permanent scroll bar included.
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Self.contentPadding).padding(.bottom, 14).padding(.top, 4)
+            .padding(.horizontal, Self.contentPadding).padding(.bottom, 14).padding(.top, 10)
+        }
+        // The display switch stays put while the list scrolls under it. Its background
+        // reaches up to the panel's top edge, so nothing shows through in the toolbar row.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            DisplaySwitch(library: library)
+                .padding(.horizontal, Self.contentPadding).padding(.top, 4).padding(.bottom, 10)
+                .background {
+                    UnevenRoundedRectangle(topLeadingRadius: 14, topTrailingRadius: 14, style: .continuous)
+                        .fill(Theme.sidebarBackground)
+                        // Inside the panel's stroke, which stays visible around it.
+                        .padding([.top, .horizontal], Theme.chromeStrokeWidth)
+                        .padding(.top, Theme.sidebarInset)
+                        .ignoresSafeArea(edges: .top)
+                }
+        }
+        // Scrolled content stops at the panel's top edge instead of showing in the gap above it.
+        .mask {
+            panelShape
+                .padding(.top, Theme.sidebarInset)
+                .ignoresSafeArea(edges: .top)
         }
         // Keys go through the app's dispatcher, so no control here should show a focus ring.
         .focusEffectDisabled()
