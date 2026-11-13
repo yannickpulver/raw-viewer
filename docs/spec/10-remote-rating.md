@@ -19,8 +19,10 @@ phone (Safari) ──tailnet──▶ http://<Mac's 100.x address>:8765 ──�
 
 ## What the phone sees
 
-- The recent folders (spec 07 §4), plus the open one. "Open on Mac" marks the folder in the
-  window; file and rating counts come from the folder summary.
+- The open folder, the recent folders (spec 07 §4), then every other folder this app has
+  opened, newest first. Folders that are gone or on an unmounted drive are left out.
+  "Open on Mac" marks the folder in the window; file and rating counts come from the folder
+  summary.
 - A folder: a grid of 400 px thumbnails, RAW / JPG / MOV / All chips (RAW first, as on the Mac)
   and a rating filter (All, Unrated, 1★+ … 5★, Rejected).
 - Tapping a tile opens a full-screen viewer with 2048 px previews. Swipe or tap the left or right third to move, tap ✕ or a

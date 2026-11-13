@@ -1266,6 +1266,14 @@ public final class Library {
         return summaryCache?[url.standardizedFileURL.path]
     }
 
+    /// Every folder that was ever open in this app, most recently updated first.
+    public func summarizedFolders() -> [URL] {
+        if summaryCache == nil { summaryCache = summaryStore.loadAll() }
+        return (summaryCache ?? [:])
+            .sorted { $0.value.updatedAt > $1.value.updatedAt }
+            .map { URL(fileURLWithPath: $0.key, isDirectory: true) }
+    }
+
     /// Drops the in-memory cache so the next read picks the file up again. The empty state
     /// calls this when it appears.
     public func reloadFolderSummaries() {

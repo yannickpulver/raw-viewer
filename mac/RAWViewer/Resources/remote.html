@@ -182,7 +182,7 @@ async function showFolders() {
     const list = $("folderList");
     list.innerHTML = "";
     $("folderStatus").hidden = folders.length > 0;
-    $("folderStatus").textContent = "No recent folders. Open one on the Mac first.";
+    $("folderStatus").textContent = "No folders yet. Open one on the Mac first.";
     for (const folder of folders) {
       const li = document.createElement("li");
       const meta = folder.total == null ? "Not read yet"

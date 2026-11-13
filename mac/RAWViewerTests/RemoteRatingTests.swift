@@ -181,6 +181,22 @@ final class RemoteRatingTests: XCTestCase {
         XCTAssertEqual(summary?.rated(stars: 4), 1)
     }
 
+    func testListsEveryFolderThisAppOpened() async throws {
+        let store = FolderSummaryStore(file: summaryFile)
+        store.save(FolderSummary(jpeg: 2, updatedAt: Date(timeIntervalSince1970: 100)), for: root)
+        store.save(FolderSummary(jpeg: 1, updatedAt: Date(timeIntervalSince1970: 200)), for: other)
+        store.save(FolderSummary(jpeg: 1), for: root.deletingLastPathComponent().appendingPathComponent("Gone"))
+        library.reloadFolderSummaries()
+
+        let (data, _) = try await get("/api/folders")
+        let folders = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        XCTAssertEqual(folders.map { $0["name"] as? String }, ["Other Shoot", "Open Shoot"],
+                       "recents first, then the rest; a deleted folder is left out")
+        XCTAssertEqual(folders.last?["total"] as? Int, 2)
+        let list = try await json("/api/files", ["folder": RemoteRating.id(root)])
+        XCTAssertEqual((list["files"] as? [[String: Any]])?.count, 2)
+    }
+
     func testRatingTheOpenFolderUpdatesTheWindow() async throws {
         try await openAndWait(root)
         let list = try await json("/api/files", ["folder": RemoteRating.id(root)])
