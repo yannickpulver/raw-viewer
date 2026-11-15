@@ -5,11 +5,9 @@ struct GridModel {
     var files: [MediaFile]
     var index: Int
     var ratings: [URL: Int]
-    /// `nil` while scenes are not grouped.
-    var scenes: Scenes?
-    /// `nil` under Best Faces: then the grid is one plain list (scenes are off there too).
+    /// `nil` under Best Faces: then the grid is one plain list.
     var days: Scenes?
-    /// The sections drawn: days and scenes merged (`ModeState.gridGroups`).
+    /// The sections drawn (`ModeState.gridGroups`).
     var groups: Scenes
     /// `Library.dayJumpRevision`: a change scrolls the current day's header to the top.
     var dayJumpRevision: Int
@@ -63,13 +61,10 @@ enum StackBadge {
 
 extension GridModel {
     func startsDay(_ group: Int) -> Bool { days?.starts(at: groups.starts[group]) ?? false }
-    func startsScene(_ group: Int) -> Bool { scenes?.starts(at: groups.starts[group]) ?? false }
 
-    /// A day band, a scene band, or both stacked when a day opens with a new scene.
+    /// A band above each day; none in the flat Best Faces list.
     var headers: [Int] {
-        (0..<groups.count).map {
-            (startsDay($0) ? GridLayout.dayHeader : 0) + (startsScene($0) ? GridLayout.sceneHeader : 0)
-        }
+        (0..<groups.count).map { startsDay($0) ? GridLayout.dayHeader : 0 }
     }
 }
 
@@ -160,7 +155,7 @@ final class GridCanvasView: NSView {
         let groups = model.groups
         guard !groups.starts.isEmpty else { return }
         for group in groups.scene(of: first)...min(groups.count - 1, groups.scene(of: last) + 1) {
-            var top = CGFloat(geometry.headerTop(scene: group))
+            let top = CGFloat(geometry.headerTop(scene: group))
             guard geometry.headers[group] > 0, top < dirtyRect.maxY,
                   top + CGFloat(geometry.headers[group]) > dirtyRect.minY else { continue }
             let start = groups.starts[group]
@@ -169,13 +164,6 @@ final class GridCanvasView: NSView {
                 drawCaption(title: Self.formatDay(model.files[start].captureDate),
                             detail: counts(model, range), top: top, height: GridLayout.dayHeader,
                             titleFont: .systemFont(ofSize: 15, weight: .semibold), titleWhite: 1)
-                top += CGFloat(GridLayout.dayHeader)
-            }
-            if model.startsScene(group), let scenes = model.scenes {
-                let range = scenes.range(of: scenes.scene(of: start))
-                let time = model.files[start].captureDate.formatted(date: .omitted, time: .shortened)
-                drawCaption(title: time, detail: counts(model, range), top: top, height: GridLayout.sceneHeader,
-                            titleFont: .systemFont(ofSize: 11, weight: .medium), titleWhite: 170.0 / 255.0)
             }
         }
     }

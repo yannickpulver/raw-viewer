@@ -64,15 +64,9 @@ public struct ModeState: Sendable {
         stacks.isEmpty ? list : list.flatMap(members(of:))
     }
 
-    /// The grid's sections: days, cut further into scenes while those are grouped.
-    public var gridGroups: Scenes {
-        switch (days, scenes) {
-        case let (days?, scenes?): return Scenes(merging: days, scenes)
-        case let (days?, nil): return days
-        case let (nil, scenes?): return scenes
-        case (nil, nil): return Scenes(total: files.count)
-        }
-    }
+    /// The grid's sections: the days, or one flat list under Best Faces. Scenes stay out of
+    /// the grid, which is for the overview; its only grouping finer than a day is the stacks.
+    public var gridGroups: Scenes { days ?? Scenes(total: files.count) }
 
     /// Multi-select. Mac app addition — no Python-app equivalent. `index` stays the single
     /// current file; `selectedURLs` is the (possibly larger) set drawn with the amber border.

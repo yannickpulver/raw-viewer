@@ -4,8 +4,6 @@ import Foundation
 public enum GridLayout {
     public static let cell: Int = 200
     public static let spacing: Int = 6
-    /// Band above each scene for its caption while scenes are grouped.
-    public static let sceneHeader: Int = 26
     /// Band above each day: the grid's sections in the date orders.
     public static let dayHeader: Int = 40
 
@@ -28,8 +26,8 @@ public enum GridLayout {
     }
 }
 
-/// Where every grid cell sits. Each group (a day, a scene, or both) starts on a new row, with
-/// a band of `headers[group]` above it for its captions. One group and no header is the plain
+/// Where every grid cell sits. Each group (a day) starts on a new row, with
+/// a band of `headers[group]` above it for its caption. One group and no header is the plain
 /// grid of spec 01 §8, with the clamping rules of spec 02 §2.
 public struct GridGeometry {
     public let columns: Int

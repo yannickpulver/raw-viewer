@@ -781,15 +781,16 @@ final class LibraryTests: XCTestCase {
         XCTAssertEqual(library.index, 0)
     }
 
-    func testGridMovesDownIntoTheNextScene() async throws {
+    /// Scenes [0, 3] on one day: the grid stays one block of 4 columns, so file 4 sits
+    /// under file 0, not under file 1 as it would with a scene row.
+    func testGridRowsIgnoreScenes() async throws {
         try await seedSceneFolder()
         library.toggleScenes()
+        XCTAssertEqual(library.scenes?.starts, [0, 3])
         library.gridColumns = 4
-        library.select(index: 1)
-        library.gridMove(dx: 0, dy: 1)
-        XCTAssertEqual(library.index, 4)
+        library.select(index: 4)
         library.gridMove(dx: 0, dy: -1)
-        XCTAssertEqual(library.index, 1)
+        XCTAssertEqual(library.index, 0)
     }
 
     func testScenesStepAsideForBestFaces() async throws {
@@ -980,13 +981,14 @@ final class LibraryTests: XCTestCase {
         try await openAndWait(root)
     }
 
-    func testDaysGroupTheTimelineAndScenesCutThemFurther() async throws {
+    func testGridGroupsByDayEvenWithScenesOn() async throws {
         try await seedTwoDayFolder()
         XCTAssertEqual(library.days?.starts, [0, 3])
         XCTAssertEqual(library.dayList.map(\.count), [3, 2])
         XCTAssertEqual(library.state.gridGroups.starts, [0, 3])
         library.toggleScenes()
-        XCTAssertEqual(library.state.gridGroups.starts, [0, 2, 3])
+        XCTAssertEqual(library.scenes?.starts, [0, 2, 3])
+        XCTAssertEqual(library.state.gridGroups.starts, [0, 3])
     }
 
     func testNavigateDayJumpsBetweenDayStarts() async throws {
