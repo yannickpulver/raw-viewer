@@ -58,6 +58,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard NSApp.modalWindow == nil, NSApp.keyWindow != nil else { return event }
             // Only the main window takes the culling keys; Settings keeps its own.
             guard event.window?.frameAutosaveName == WindowConfigurator.autosaveName else { return event }
+            // A text field (the help search) takes its keys. Esc on an empty field closes it;
+            // with text, the field clears itself.
+            if let editor = event.window?.firstResponder as? NSTextView, editor.isFieldEditor {
+                guard event.keyCode == AppModel.KeyCode.escape, editor.string.isEmpty else { return event }
+            }
             return MainActor.assumeIsolated { self.model.handleKey(event) ? nil : event }
         }
 
