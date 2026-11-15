@@ -160,7 +160,7 @@ public final class AppModel {
 
     // MARK: - Key dispatch (spec 02 §1-2)
 
-    private enum KeyCode {
+    enum KeyCode {
         static let left: UInt16 = 123
         static let right: UInt16 = 124
         static let down: UInt16 = 125

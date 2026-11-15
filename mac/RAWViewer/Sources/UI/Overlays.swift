@@ -168,61 +168,170 @@ private struct OverlayPanel<Content: View>: View {
 
 struct HelpOverlay: View {
     let onClose: () -> Void
+    @State private var query = ""
 
-    /// Verbatim from spec 01 §5, plus the Mac app additions (↑/↓, ⌥↑/⌥↓, ⌥⌘0, U, K, ⇧⌘M, ⇧⌘N, ⇧S, V, F).
-    static let text = """
-      ←/→         Navigate images
-      ↑/↓         Previous/next scene
-      ⌥↑/⌥↓     Previous/next day (also Page Up/Down)
-      0-5          Rate current image
-      X            Reject (toggle)
-      ⌘0-5        Filter by rating
-      ⌥⌘0         Filter unrated
-      U            Unviewed only (not seen before)
-      ⌘⌫          Move rejected to _rejected/
-      ⇧⌘M         Move shown files to folder…
-      ⇧⌘N         Toggle newest first
+    private struct Shortcut: Identifiable {
+        let keys: String
+        let label: String
+        var id: String { keys + label }
+    }
 
-      S            Go to start
-      E            Go to end
-      ⇧R          Go to last rated
-      R            Rotate 90°
+    private struct Section: Identifiable {
+        let title: String
+        let items: [Shortcut]
+        var id: String { title }
+    }
 
-      J            Toggle RAW/JPEG mode
-      M            Toggle Video mode
-      A            Toggle All files mode
-      Space        Play/Pause video
-      I            Toggle sidebar
-      ⌘S          Toggle filmstrip
-      G            Toggle grid view
-      ⇧S          Group by scene (and stacks)
-      K            Expand/collapse stack
-      V            Duel: ← / → keeps one, ↓ both
-      ⌘Z          Undo duel choice
-      F            Toggle faces
-      H            Toggle this help
-      T            Toggle shoot stats
+    /// Spec 01 §5, plus the Mac app additions (↑/↓, ⌥↑/⌥↓, ⌥⌘0, U, K, ⇧⌘M, ⇧⌘N, ⇧S, V, F).
+    private static let sections: [Section] = [
+        Section(title: "Navigate", items: [
+            Shortcut(keys: "← →", label: "Previous / next image"),
+            Shortcut(keys: "↑ ↓", label: "Previous / next scene"),
+            Shortcut(keys: "⌥↑ ⌥↓  ⇞ ⇟", label: "Previous / next day"),
+            Shortcut(keys: "S", label: "Go to start"),
+            Shortcut(keys: "E", label: "Go to end"),
+            Shortcut(keys: "⇧R", label: "Go to last rated"),
+        ]),
+        Section(title: "Rate & Filter", items: [
+            Shortcut(keys: "0–5", label: "Rate current image"),
+            Shortcut(keys: "X", label: "Reject (toggle)"),
+            Shortcut(keys: "⌘0–5", label: "Filter by rating"),
+            Shortcut(keys: "⌥⌘0", label: "Filter unrated"),
+            Shortcut(keys: "U", label: "Unviewed only"),
+            Shortcut(keys: "⇧⌘N", label: "Newest first"),
+        ]),
+        Section(title: "View", items: [
+            Shortcut(keys: "G", label: "Grid view"),
+            Shortcut(keys: "J", label: "RAW / JPEG mode"),
+            Shortcut(keys: "M", label: "Video mode"),
+            Shortcut(keys: "A", label: "All files mode"),
+            Shortcut(keys: "⇧S", label: "Group by scene (and stacks)"),
+            Shortcut(keys: "K", label: "Expand / collapse stack"),
+            Shortcut(keys: "Space", label: "Play / pause video, zoom 2×"),
+            Shortcut(keys: "R", label: "Rotate 90°"),
+            Shortcut(keys: "C", label: "Compare with pinned image"),
+            Shortcut(keys: "V", label: "Duel: ← → keep one, ↓ both"),
+            Shortcut(keys: "⌘Z", label: "Undo duel choice"),
+            Shortcut(keys: "F", label: "Faces"),
+            Shortcut(keys: "I", label: "Sidebar"),
+            Shortcut(keys: "⌘S", label: "Filmstrip"),
+        ]),
+        Section(title: "Files", items: [
+            Shortcut(keys: "⌘⌫", label: "Move rejected to _rejected/"),
+            Shortcut(keys: "⇧⌘M", label: "Move shown files to folder…"),
+            Shortcut(keys: "O", label: "Show in Finder"),
+            Shortcut(keys: "⌘L", label: "Open all in Lightroom"),
+            Shortcut(keys: "⌘D", label: "Export to DaVinci Resolve"),
+        ]),
+        Section(title: "Selection", items: [
+            Shortcut(keys: "⇧Click", label: "Select range"),
+            Shortcut(keys: "⌘Click", label: "Toggle selection"),
+            Shortcut(keys: "⌘A", label: "Select all"),
+        ]),
+        Section(title: "App", items: [
+            Shortcut(keys: "H", label: "Keyboard shortcuts"),
+            Shortcut(keys: "T", label: "Shoot stats"),
+            Shortcut(keys: "Esc", label: "Up a level"),
+            Shortcut(keys: "⌘Q", label: "Quit"),
+        ]),
+    ]
 
-      C            Compare with pinned image
-      O            Show in Finder
-      ⌘L          Open all in Lightroom
-      ⌘D          Export to DaVinci Resolve
-      Esc          Up a level: single → grid → close folder
-      ⌘Q          Quit
-
-      ⇧Click       Select range (grid/filmstrip)
-      ⌘Click      Toggle selection (grid/filmstrip)
-      ⌘A          Select all
-    """
+    /// Matches the label, the key ("x", "⌘d") or the section title ("files").
+    private var filtered: [Section] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return Self.sections }
+        return Self.sections.compactMap { section in
+            if section.title.localizedCaseInsensitiveContains(q) { return section }
+            let items = section.items.filter {
+                $0.label.localizedCaseInsensitiveContains(q) || $0.keys.localizedCaseInsensitiveContains(q)
+            }
+            return items.isEmpty ? nil : Section(title: section.title, items: items)
+        }
+    }
 
     var body: some View {
-        OverlayPanel(title: "Keyboard Shortcuts", onClose: onClose) {
-            // A column-aligned key table: it stays monospaced.
-            Text(Self.text)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(Theme.panelText)
-                .lineSpacing(12 * 0.6)
-                .fixedSize()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text("Shortcuts")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.panelText)
+                Spacer(minLength: 0)
+                Button(action: onClose) { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .foregroundStyle(.secondary)
+                    .help("Close (Esc)")
+            }
+            .padding(.leading, 4)
+            SearchField(text: $query, placeholder: "Search")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(filtered) { section in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(section.title)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.bottom, 2)
+                            ForEach(section.items) { item in
+                                HStack(spacing: 12) {
+                                    Text(item.label)
+                                        .foregroundStyle(Theme.panelText)
+                                    Spacer(minLength: 0)
+                                    Text(item.keys)
+                                        .foregroundStyle(Theme.dimText)
+                                }
+                                .font(.system(size: 12))
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    if filtered.isEmpty {
+                        Text("No shortcuts")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+            .scrollIndicators(.automatic)
+        }
+        .padding(10)
+        .frame(width: 320, height: 420)
+        .chromeSurface(.regularMaterial, cornerRadius: 12, scrim: 0.72, glass: false)
+        .shadow(color: .black.opacity(0.45), radius: 20, y: 6)
+    }
+}
+
+/// AppKit's search field: magnifier, clear button, Esc clears. It takes focus when it appears,
+/// so typing filters right away; the key monitor lets keys through while a text field edits.
+private struct SearchField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        field.controlSize = .regular
+        field.focusRingType = .none
+        DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        if field.stringValue != text { field.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ note: Notification) {
+            guard let field = note.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
         }
     }
 }
