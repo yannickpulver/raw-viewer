@@ -48,12 +48,6 @@ public struct Scenes: Equatable, Sendable {
         self.starts = starts
     }
 
-    /// Every cut of both, so a scene running past midnight splits at the day.
-    public init(merging first: Scenes, _ second: Scenes) {
-        total = max(first.total, second.total)
-        starts = Array(Set(first.starts).union(second.starts)).sorted()
-    }
-
     public var count: Int { starts.count }
 
     /// Whether a group starts at `index`.

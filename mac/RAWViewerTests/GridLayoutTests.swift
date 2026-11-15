@@ -76,7 +76,7 @@ final class GridLayoutTests: XCTestCase {
 
     // MARK: - Scenes
 
-    let header = GridLayout.sceneHeader
+    let header = 26
 
     /// Scenes of 6 and 3 files, 4 columns: rows start at 0, 4 (scene 0) and 6 (scene 1).
     private var grouped: GridGeometry {

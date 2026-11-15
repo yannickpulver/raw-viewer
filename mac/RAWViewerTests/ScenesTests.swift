@@ -37,12 +37,6 @@ final class ScenesTests: XCTestCase {
         XCTAssertFalse(days.starts(at: 3))
     }
 
-    func testMergingKeepsEveryCut() {
-        let merged = Scenes(merging: SceneFixtures.scenes([2, 3, 1]), SceneFixtures.scenes([3, 3]))
-        XCTAssertEqual(merged.starts, [0, 2, 3, 5])
-        XCTAssertEqual(merged.total, 6)
-    }
-
     func testEmptyAndUngrouped() {
         XCTAssertEqual(Scenes(files: []).count, 0)
         XCTAssertEqual(Scenes(total: 0).count, 0)

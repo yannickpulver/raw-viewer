@@ -542,12 +542,11 @@ Mac app addition, no Python-app equivalent: **Group by Scene** (`⇧S`, View men
 persisted). A scene is a run of consecutive files shot at most 60 s apart
 (`Scenes.maxGap`). While grouping is on:
 
-- the grid starts every scene on a new row, under a 26 px caption:
-  `Sat, 20 Sep · 11:50 · 6 frames · 2 picked`
+- the grid keeps its day sections only (scenes would cut the overview into
+  short rows); multi-exposure brackets still fold into stacks there
 - the filmstrip leaves a 16 px gap with a hairline between scenes
 - `↓` / `↑` in the single view jump to the next / previous scene start (back
-  from mid-scene goes to that scene's start first); grid arrows move by row and
-  clamp into shorter scene rows
+  from mid-scene goes to that scene's start first)
 - the position counter reads `7/137  ·  Scene 12/118`
 
 Scenes only exist in the date orders. Under Best Faces the timeline stays flat,
@@ -575,9 +574,8 @@ respects the rating filter, so `⌘1` then `V` is a second pass over the picks.
 Mac app addition: **days in the grid**. In the date orders the grid is cut into
 days (`ModeState.days`, calendar day of the capture date): every day starts on a
 new row under a 40 px band `Wednesday, 4 November  ·  312 frames  ·  12 picked`
-(year shown when not this year). With Group by Scene on, scenes cut the days
-further (`ModeState.gridGroups`); a scene band then reads `15:27  ·  7 frames`,
-stacked under the day band when a day opens with a scene. Best Faces keeps one
+(year shown when not this year). Days are the grid's only sections
+(`ModeState.gridGroups`), with or without Group by Scene. Best Faces keeps one
 flat grid. `⌥↓` / `⌥↑` (also Page Down / Page Up, View menu) jump to the next /
 previous day start in the grid and the single view (back from mid-day goes to
 the day's start first); in the grid a day jump scrolls the day's band to the
@@ -596,7 +594,7 @@ two-value entries are read again once). The cover is the frame closest to
 shows `Stack of 3 · 0, −0.7, +0.7 EV` with Expand / Collapse, and `K` (View
 menu) toggles it. Rating a collapsed stack rates every frame; once expanded,
 each frame is rated alone. Lightroom, Resolve, Move Shown and the selection
-menu act on all frames of a collapsed stack. Day and scene captions and the
+menu act on all frames of a collapsed stack. Day captions and the
 Days list count frames, stacked ones included.
 
 The sidebar's segmented rows (Single / Grid, file kind, rating) are plain buttons

@@ -59,6 +59,8 @@ struct FilterBadge: View {
             .padding(.horizontal, 10).padding(.vertical, 4)
             .background(Theme.amber, in: Capsule())
             .overlay(Capsule().strokeBorder(Theme.amberBorder.opacity(0.7), lineWidth: 0.5))
+            // Room between the capsule and the toolbar item's glass pill.
+            .padding(.horizontal, 4)
     }
 }
 
