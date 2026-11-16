@@ -1,6 +1,6 @@
 # RAW Viewer
 
-Fast RAW image viewer for photo culling with Lightroom-compatible ratings and DaVinci Resolve integration.
+Fast photo and video viewer for culling RAW, JPEG and MOV/MP4, with Lightroom-compatible ratings.
 
 ![Screenshot](docs/screenshot.png)
 
