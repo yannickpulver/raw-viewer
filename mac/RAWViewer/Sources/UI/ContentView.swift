@@ -28,6 +28,8 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 if library.folder != nil && library.showSidebar {
                     Sidebar(model: model)
+                } else if showsLaunchScreen {
+                    SessionPanel(model: model)
                 }
             }
 
@@ -102,7 +104,7 @@ struct ContentView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Theme.dimText)
             } else {
-                EmptyStateView(model: model)
+                Color.black
             }
         } else if library.displayMode == .duel {
             DuelPane(model: model)
@@ -175,6 +177,11 @@ struct ContentView: View {
 
     // MARK: - Chrome
 
+    /// Nothing open and nothing loading: recent folders left, session panel right.
+    private var showsLaunchScreen: Bool {
+        library.files.isEmpty && !library.isScanning && !library.hasLoadedFolder
+    }
+
     @ViewBuilder
     private var overlays: some View {
         // The reader stays inside the safe area, because only there does it report the toolbar
@@ -183,6 +190,9 @@ struct ContentView: View {
             LoadingBadge(library: library, toolbarHeight: geometry.safeAreaInsets.top)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .ignoresSafeArea(edges: .top)
+        }
+        if showsLaunchScreen {
+            LaunchRecents(model: model)
         }
         ZStack(alignment: .bottomLeading) {
             Color.clear

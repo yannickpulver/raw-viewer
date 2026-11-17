@@ -491,6 +491,24 @@ When `len(files) == 0` (`viewer.py:1679`):
   Menlo 11 px (`viewer.py:964`, `:2005`).
 - The `?` and `⏱` buttons remain visible.
 
+Mac app change (0.5.19): the empty state is a **launch screen** in two parts.
+
+- Left: "Recent" with an `Open Folder…` button, then one card per recent folder.
+  A card shows three pictures of the folder's best photos, the folder name, its
+  drive ("This Mac", or the name under `/Volumes`), "rated / total", the shoot
+  time and when it was last open (or "Done" once nothing is unrated), and the
+  rating histogram as one bar. Numbers come from `folder_summaries.json` and
+  `shoot_stats.json`; nothing is rescanned.
+- A folder whose drive is unplugged stays in its place. Its card is dimmed with
+  a dashed border and says "<drive> · offline" in amber. A click shows "Connect
+  <drive> to open this folder" instead of opening. The cards follow when a
+  drive is mounted or unmounted. Right-click: "Remove from Recents".
+- Right: a session panel in the photo sidebar's place and look: Detect faces,
+  Rate on Phone (the switch, or the QR code while the server runs), a few
+  shortcuts with a link to all of them, and the version.
+- With no recents at all: the old centred `Open Folder` button and "or drop a
+  folder anywhere in this window".
+
 ---
 
 ## 8. Grid view

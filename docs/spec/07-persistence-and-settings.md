@@ -100,6 +100,14 @@ the home directory (`viewer.py:1551`).
 The UI shows only the folder's basename with the full path as a tooltip
 (`viewer.py:2192`).
 
+Mac app change (0.5.19): entries that are not reachable are **kept**, so a shoot
+on an unplugged drive shows as offline on the launch screen until the drive is
+back. "Remove from Recents" drops one entry. The folder picker starts in the
+first reachable recent folder. Each recent folder also gets three small JPEGs of
+its best photos (highest stars first, then the first unrated ones; no videos, no
+rejected) in `~/Library/Application Support/RAW Viewer/picks/`, written when the
+folder is closed, another one is opened, or the app quits.
+
 ---
 
 ## 5. Shoot stats — `shoot_stats.json`

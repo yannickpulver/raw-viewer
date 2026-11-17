@@ -21,6 +21,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Sidebar (`I`) with the photo info (histogram, exposure, camera and lens), clickable stars, faces, filters with rating counts and sort order
 - Pinch-to-zoom, two-finger swipe navigation
 - Filter by minimum rating
+- Start screen: recent shoots with their best photos, how much is rated, and which drive they are on, even while it is unplugged
 - Face detection (optional, switched on the start screen; local, Apple Vision): boxes on the photo, face crops with closed-eye markers in the sidebar, click a face to zoom in
 - Sort oldest first, newest first, or by best faces (most sharp, open-eyed faces first)
 - Video mode (MOV/MP4 playback)
@@ -30,7 +31,7 @@ Or grab the latest build from the [Releases](https://github.com/yannickpulver/ra
 - Reopening a folder continues at the photo where you left off
 - Unviewed only: show just the frames no earlier session opened; what you view now stays in the list
 - Duel: two frames of a scene side by side with shared zoom; keep one or both until the scene's best get 2★ (`Cmd+1`, then `V`)
-- Rate on your phone: the app serves a page over [Tailscale](https://tailscale.com); open it on any device in your tailnet, pick a recent folder and swipe through it (Settings → Rate on Phone)
+- Rate on your phone: the app serves a page over [Tailscale](https://tailscale.com); open it on any device in your tailnet, pick a recent folder and swipe through it (start screen or Settings → Rate on Phone)
 - DaVinci Resolve export with rating metadata
 - Auto-updates: new releases are offered in the app and installed with one click
 
