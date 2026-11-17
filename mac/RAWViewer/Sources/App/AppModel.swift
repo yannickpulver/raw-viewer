@@ -58,7 +58,8 @@ public final class AppModel {
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.directoryURL = library.recentFolders.first ?? FileManager.default.homeDirectoryForCurrentUser
+        panel.directoryURL = library.recentFolders.first(where: RecentFolders.isReachable)
+            ?? FileManager.default.homeDirectoryForCurrentUser
         guard panel.runModal() == .OK, let url = panel.url else { return }
         library.openFolder(url)
     }

@@ -79,6 +79,7 @@ public final class Library {
     private let recents: RecentFolders
     private let preferences: Preferences
     private let summaryStore: FolderSummaryStore
+    private let picks: FolderPicks
     private let viewedStore: ViewedStore
 
     private var scanTask: Task<Void, Never>?
@@ -143,11 +144,13 @@ public final class Library {
                 recents: RecentFolders = .shared,
                 scheduler: PreloadScheduler? = nil,
                 summaryStore: FolderSummaryStore = .shared,
+                picks: FolderPicks = .shared,
                 viewedStore: ViewedStore = .shared,
                 faceIndex: FaceIndex? = nil) {
         self.preferences = preferences
         self.recents = recents
         self.summaryStore = summaryStore
+        self.picks = picks
         self.viewedStore = viewedStore
         self.scheduler = scheduler ?? PreloadScheduler()
         self.faceIndex = faceIndex ?? FaceIndex()
@@ -201,6 +204,8 @@ public final class Library {
     // MARK: - Opening and closing
 
     public func openFolder(_ url: URL) {
+        // An offline recent (drive unplugged): the launch screen says what to connect.
+        guard RecentFolders.isReachable(url) else { return }
         scanTask?.cancel()
         scanGeneration &+= 1
         let generation = scanGeneration
@@ -1171,7 +1176,30 @@ public final class Library {
     public func persistShootStats() {
         writeShootStats()
         saveFolderSummary()
+        saveFolderPicks()
         saveViewed()
+    }
+
+    /// The launch screen card's pictures: the best photos, copied from the thumbnail cache
+    /// while the files are still reachable. Once per open / close / quit, not per rating.
+    private func saveFolderPicks() {
+        guard let folder, hasLoadedFolder else { return }
+        let chosen = FolderPicks.choose(modeStates[.all]?.allFiles ?? []) { rating(for: $0) }
+        let cache = DiskThumbnailCache.shared
+        let images = chosen.compactMap { file in
+            cache.get(file.url, size: PreviewDecoder.gridThumbnailSize)
+                ?? cache.get(file.url, size: PreviewDecoder.filmstripThumbnailSize)
+        }
+        picks.save(images, for: folder)
+    }
+
+    /// The pictures saved for a recent folder, best first; empty when it has none yet.
+    public func folderPicks(for url: URL) -> [CGImage] { picks.load(folder: url) }
+
+    /// Drops a folder from the recent list, with its launch screen pictures.
+    public func removeRecent(_ url: URL) {
+        recents.remove(url)
+        picks.remove(folder: url)
     }
 
     // MARK: - Viewed files (mac app addition)

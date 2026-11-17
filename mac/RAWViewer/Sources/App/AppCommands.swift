@@ -36,6 +36,7 @@ struct AppCommands: Commands {
             Menu("Open Recent") {
                 ForEach(library.recentFolders, id: \.self) { folder in
                     Button(folder.lastPathComponent) { library.openFolder(folder) }
+                        .disabled(!RecentFolders.isReachable(folder))
                 }
             }
             Divider()

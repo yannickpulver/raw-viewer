@@ -96,15 +96,7 @@ struct Sidebar: View {
         // column, so the image area ends to its left instead of running underneath. The panel
         // reaches up into the toolbar row, where the toolbar's sidebar toggle sits in its
         // top-right corner; the controls stay below the toolbar, where they get the clicks.
-        .background {
-            panelShape
-                .fill(Theme.sidebarBackground)
-                .overlay(panelShape.strokeBorder(Theme.chromeStroke, lineWidth: Theme.chromeStrokeWidth))
-                .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
-                .padding(.top, Theme.sidebarInset)
-                .ignoresSafeArea(edges: .top)
-        }
-        .padding([.horizontal, .bottom], Theme.sidebarInset)
+        .floatingPanel()
     }
 
     private var panelShape: RoundedRectangle {
@@ -112,7 +104,7 @@ struct Sidebar: View {
     }
 }
 
-private struct SectionHeader: View {
+struct SectionHeader: View {
     let title: String
     let symbol: String
 
@@ -126,7 +118,7 @@ private struct SectionHeader: View {
 
 /// A rounded panel, with its symbol and title above it unless the title sits elsewhere
 /// (the Photo section's lives in the toolbar row). As in Print Lab's inspector.
-private struct SidebarSection<Content: View>: View {
+struct SidebarSection<Content: View>: View {
     var title: String? = nil
     var symbol: String = ""
     @ViewBuilder var content: Content
@@ -423,5 +415,22 @@ private struct Segments<Value: Hashable, Content: View>: View {
         }
         .padding(2)
         .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+    }
+}
+
+extension View {
+    /// The sidebar's panel: rounded, inset from the window edges, reaching up into the toolbar
+    /// row. The launch screen's session panel uses it too, so both sit in the same place.
+    func floatingPanel() -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return background {
+            shape
+                .fill(Theme.sidebarBackground)
+                .overlay(shape.strokeBorder(Theme.chromeStroke, lineWidth: Theme.chromeStrokeWidth))
+                .shadow(color: .black.opacity(0.5), radius: 12, y: 4)
+                .padding(.top, Theme.sidebarInset)
+                .ignoresSafeArea(edges: .top)
+        }
+        .padding([.horizontal, .bottom], Theme.sidebarInset)
     }
 }

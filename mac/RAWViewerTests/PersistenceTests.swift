@@ -43,14 +43,59 @@ final class PersistenceTests: XCTestCase {
         XCTAssertEqual(Set(recents.load().map(\.lastPathComponent)).count, RecentFolders.maximum)
     }
 
-    func testRecentFoldersPrunesNonDirectories() throws {
+    func testRecentFoldersKeepOfflineFolders() throws {
         let recents = RecentFolders(defaults: defaults)
         let good = try folder("good")
         let gone = try folder("gone")
         recents.add(good)
         recents.add(gone)
         try FileManager.default.removeItem(at: gone)
-        XCTAssertEqual(recents.load().map(\.lastPathComponent), ["good"])
+        XCTAssertEqual(recents.load().map(\.lastPathComponent), ["gone", "good"])
+        XCTAssertFalse(RecentFolders.isReachable(gone))
+        XCTAssertTrue(RecentFolders.isReachable(good))
+    }
+
+    func testRecentFoldersRemove() throws {
+        let recents = RecentFolders(defaults: defaults)
+        let one = try folder("one")
+        let two = try folder("two")
+        recents.add(one)
+        recents.add(two)
+        recents.remove(two)
+        XCTAssertEqual(recents.load().map(\.lastPathComponent), ["one"])
+    }
+
+    func testDriveNameFromPath() {
+        XCTAssertEqual(RecentFolders.driveName(URL(fileURLWithPath: "/Volumes/Samsung T7/2026.11.15 - Wedding")), "Samsung T7")
+        XCTAssertEqual(RecentFolders.driveName(URL(fileURLWithPath: "/Users/me/Pictures/Shoot")), "This Mac")
+        XCTAssertEqual(RecentFolders.driveName(URL(fileURLWithPath: "/Volumes")), "This Mac")
+    }
+
+    func testFolderPicksChoosesBestFirstThenFillsUnrated() {
+        func file(_ name: String, _ kind: MediaKind = .raw) -> MediaFile {
+            MediaFile(url: URL(fileURLWithPath: "/shoot/\(name)"), kind: kind, captureDate: Date(), subfolder: "")
+        }
+        let files = [file("a"), file("b"), file("c"), file("clip", .video), file("d"), file("e")]
+        let stars = ["/shoot/b": 3, "/shoot/c": -1, "/shoot/clip": 5, "/shoot/d": 5]
+        let picks = FolderPicks.choose(files) { stars[$0.path] ?? 0 }
+        XCTAssertEqual(picks.map(\.url.lastPathComponent), ["d", "b", "a"])
+    }
+
+    func testFolderPicksRoundTrip() throws {
+        let store = FolderPicks(directory: root.appendingPathComponent("picks"))
+        let shoot = try folder("shoot")
+        let context = CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+        let image = context.makeImage()!
+        store.save([image, image], for: shoot)
+        XCTAssertEqual(store.load(folder: shoot).count, 2)
+        store.save([], for: shoot)
+        XCTAssertEqual(store.load(folder: shoot).count, 2, "an empty save keeps the old pictures")
+        store.save([image], for: shoot)
+        XCTAssertEqual(store.load(folder: shoot).count, 1)
+        store.remove(folder: shoot)
+        XCTAssertTrue(store.load(folder: shoot).isEmpty)
     }
 
     func testFolderSummaryStoreRoundTrip() throws {
