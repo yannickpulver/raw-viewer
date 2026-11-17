@@ -323,7 +323,7 @@ struct SessionPanel: View {
                 .foregroundStyle(.tertiary)
                 .padding(.leading, 4)
         }
-        .padding(.horizontal, 14).padding(.top, 10).padding(.bottom, 14)
+        .padding(.horizontal, 14).padding(.top, 24).padding(.bottom, 14)
         .focusEffectDisabled()
         .frame(width: Theme.sidebarWidth)
         .floatingPanel()
